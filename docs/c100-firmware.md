@@ -943,12 +943,11 @@ and ends with a tail call `write(fd, template, 0x270)` (`b 0x385a0` at
 template after its SOI. `FUN_000385a0` waits for the file task to take the
 data, so one static APP1 is enough. It runs once per photo in the camera task.
 
-The APP1 (417 B) comes from `tools/exif.py` at build time. Per photo the
+The APP1 (393 B) comes from `tools/exif.py` at build time. Per photo the
 camera fills in:
 
-- **Pixel size**, copied from the SOF0: `ImageWidth/Height` in IFD0 and
-  `ExifImageWidth/Height`. The IFD0 pair is kept on purpose; it gives
-  exiftool's two minor "not allowed in JPEG" warnings.
+- **Pixel size** (`ExifImageWidth/Height`), copied from the SOF0. IFD0
+  `ImageWidth/Height` are left out: they aren't allowed in a JPEG.
 - **`DateTimeOriginal` and `CreateDate`.**
   - They come from the RTC via `FUN_00052bd4(int t[7])`, which gives sec,
     min, hour, mday, mon, year, wday and returns 0.
@@ -1006,8 +1005,8 @@ address. It is full: more tags need another cave.
   81, a WB preset), and the firmware's own snprintf runs.
 - It checks SOI, then APP1, then the untouched rest of the template, and
   that the stack is balanced.
-- exiftool then shows 1/100 s, ISO 126, f/2.4 and manual WB, with only the
-  two minor IFD0 size warnings.
+- exiftool then shows 1/100 s, ISO 126, f/2.4 and manual WB, and
+  `-validate` reports OK.
 
 ## Video
 
