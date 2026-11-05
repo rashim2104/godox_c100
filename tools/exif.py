@@ -2,11 +2,10 @@
 
     python3 -I tools/exif.py asm > build/obj/exif.inc
 
-Little-endian TIFF with IFD0 (size, resolution, make, model, software,
-artist) and an Exif IFD (exposure, f-number, ISO, version, DateTimeOriginal,
+Little-endian TIFF with IFD0 (resolution, make, model, software, artist) and an Exif IFD (exposure, f-number, ISO, version, DateTimeOriginal,
 CreateDate, OffsetTimeOriginal, colour space, pixel size, white balance).
-Per photo, the camera fills in the two dates (DATE0, DATE1), the size (W0/H0 in IFD0, W/H in
-the Exif IFD), the exposure time's numerator (EXPO, over 1014000 s), ISO
+Per photo, the camera fills in the two dates (DATE0, DATE1), the size (W, H: ExifImageWidth/Height; IFD0
+ImageWidth/Height are not allowed in a JPEG), the exposure time's numerator (EXPO, over 1014000 s), ISO
 and WHITE_BALANCE; their offsets in APP1 come out as equs.
 
 Exposure, from the firmware (see docs, EXIF): the GC2083 AE table steps in
@@ -14,8 +13,7 @@ Exposure, from the firmware (see docs, EXIF): the GC2083 AE table steps in
 0.030/1014 s (also 1/(30 fps x 1125 lines VTS)). ISO is the firmware's own
 light-meter convention, 100 x gain/64. f/2.4 is the lens f-number the
 light meter uses (double at 0x21a5c). No value is shared between tags
-(exiftool -validate flags overlaps); IFD0 ImageWidth/ImageHeight are kept
-on purpose and give exiftool's two minor "not allowed in JPEG" warnings.
+(exiftool -validate flags overlaps), and it validates with no warnings.
 Settings from the environment: EXIF_MAKE, EXIF_MODEL, EXIF_SOFTWARE,
 EXIF_ARTIST, EXIF_OFFSET (the camera has no time zone, so it is fixed here).
 """
@@ -44,8 +42,6 @@ def build(c=None, width=0, height=0, date=b'    :  :     :  :  '):
     date = date.ljust(DATE_LEN - 1)[:DATE_LEN - 1] + b'\0'
 
     ifd0 = [
-        (0x0100, LONG, 1, 'W0', struct.pack('<I', width)),
-        (0x0101, LONG, 1, 'H0', struct.pack('<I', height)),
         (0x010f, ASCII, None, None, asc(c['make'])),
         (0x0110, ASCII, None, None, asc(c['model'])),
         (0x011a, RATIONAL, 1, None, struct.pack('<II', 72, 1)),

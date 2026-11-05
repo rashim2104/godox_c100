@@ -47,14 +47,10 @@ exif_write:                               @ r0 = fd, r1 = template, r2 = 0x270
     orr     r0, r1, r0, lsl #8
     ldr     r3, =W
     strh    r0, [r6, r3]
-    ldr     r3, =W0
-    strh    r0, [r6, r3]
     ldrb    r0, [r5, #7]                  @ height
     ldrb    r1, [r5, #8]
     orr     r0, r1, r0, lsl #8
     ldr     r3, =H
-    strh    r0, [r6, r3]
-    ldr     r3, =H0
     strh    r0, [r6, r3]
 
     ldr     r3, =AE_LINES - base          @ ExposureTime = lines x 30 / 1014000
