@@ -18,7 +18,7 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | Feature | State |
 |---|---|
 | [Digicam modes](#digicam-modes) CCD and Y2K: gamma curves and colour matrix per mode in the ISP | on the camera, working (`v028`, 2026-11-05) |
-| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | emulator (`v029`) |
+| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | on the camera, working (`v029`, 2026-11-05, IMG_0031–0036, 16:9 and 1:1) |
 | [Sounds](#sounds): shutter, power-on chime, mode click (`tools/sounds.py`) | emulator (`v029`) |
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
@@ -187,7 +187,8 @@ which shifts every address after them).
   `FUN_00019568`), which never showed on photos. The looks work on the camera
   (2026-11-05, IMG_0015–0024).
 - `v029_digicam.bin` — the pixel presets removed: `nor`, `CCD`, `Y2K` only,
-  our own date stamp, the digicam sounds. Emulator only so far.
+  our own date stamp, the digicam sounds. Works on the camera (2026-11-05,
+  IMG_0031–0036).
 
 ## Code caves and hooks
 
