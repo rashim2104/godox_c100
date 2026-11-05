@@ -25,7 +25,7 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | [Sounds](#sounds): shutter, power-on chime, mode click (`tools/sounds.py`) | emulator (`v029`) |
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
-| [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | on the camera (`v030`) |
+| [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | emulator (`v030`); not yet confirmed on the camera |
 | [More modes](#more-modes-and-stamp-options) BW, NGT, SUN; stamp order, time and colour as build options | on the camera (`v034`, IMG_0052–0057); options emulator |
 | [Vignette](#the-isp-look-vignette): lens shading off in the digicam modes | on the camera (`v032`) |
 | [Digicam modes on video](#digicam-modes-on-video): the mode's ISP profile and the date stamp in every frame | stamp on the camera (`v032`, IMG_0044) |
