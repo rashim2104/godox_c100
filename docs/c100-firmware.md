@@ -2,7 +2,7 @@
 
 _Last updated 2026-11-05_
 
-**Now (`v032`):** six modes on the center button, `nor` → `CCD` → `Y2K` →
+**Now (`v034`):** six modes on the center button, `nor` → `CCD` → `Y2K` →
 `bW` → `nGt` → `SUn`: the factory camera, and five early-2000s digicam looks
 done in the camera's own ISP (full resolution, hardware JPEG; tone, colour,
 vignette), with a clean orange `05 11 '26`
@@ -21,14 +21,14 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | Feature | State |
 |---|---|
 | [Digicam modes](#digicam-modes) CCD and Y2K: gamma curves and colour matrix per mode in the ISP | on the camera, working (`v028`, 2026-11-05) |
-| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | on the camera (`v029`, IMG_0031–0036); clean italic digits `v031`, emulator |
+| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | on the camera (`v029`, IMG_0031–0036); clean italic digits on the camera since `v032` |
 | [Sounds](#sounds): shutter, power-on chime, mode click (`tools/sounds.py`) | emulator (`v029`) |
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
-| [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | emulator (`v030`) |
-| [More modes](#more-modes-and-stamp-options) BW, NGT, SUN; stamp order, time and colour as build options | emulator (`v032`) |
+| [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | on the camera (`v030`) |
+| [More modes](#more-modes-and-stamp-options) BW, NGT, SUN; stamp order, time and colour as build options | on the camera (`v034`, IMG_0052–0057); options emulator |
 | [Vignette](#the-isp-look-vignette): lens shading off in the digicam modes | on the camera (`v032`) |
-| [Digicam modes on video](#digicam-modes-on-video): the mode's ISP profile and the date stamp in every frame | emulator (`v032`) |
+| [Digicam modes on video](#digicam-modes-on-video): the mode's ISP profile and the date stamp in every frame | stamp on the camera (`v032`, IMG_0044) |
 | [Photo sizes and JPEG quality](#photo-sizes-and-jpeg-quality): `SIZE*`, `JPEG_Q` | emulator (`v032`), factory by default |
 
 Contents: [The device](#the-device) · [Image layout](#firmware-image-layout-gp_cardvr_upgradebin-v116) ·
@@ -210,7 +210,8 @@ which shifts every address after them).
   modes halve the thresholds instead of setting 1. On the camera
   (IMG_0045–0051): better, still 5–10× noisier than `v029`.
 - `v034_clean.bin` — sharpening and NR left to the camera; the digicam modes
-  keep only the vignette. Emulator only so far.
+  keep only the vignette. Works on the camera (2026-11-05, IMG_0052–0057):
+  noise back to `v029`'s in every mode, all six looks and the stamp.
 
 ## Code caves and hooks
 
