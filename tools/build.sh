@@ -104,7 +104,7 @@ VIDTIMING=${VIDTIMING:-0}
 VFX_PATCHES=""
 if [ "$VIDFX" = "1" ]; then
     VT=""; [ "$VIDTIMING" = "1" ] && VT="--defsym=VIDTIMING=1"
-    VCAVE=$(asm video_cave 0xbb774 0xbbb08 --defsym=LUT_FILL_ADDR=$(sym lut_fill) --defsym=PVARS_ADDR=$(sym VARS) --defsym=DRAW_TAG_ADDR=$(sym draw_tag) --defsym=FX_STRIP_ADDR=$(sym fx_strip) $VT)
+    VCAVE=$(asm video_cave 0xbb774 0xbbaa0 --defsym=LUT_FILL_ADDR=$(sym lut_fill) --defsym=PVARS_ADDR=$(sym VARS) --defsym=DRAW_TAG_ADDR=$(sym draw_tag) --defsym=FX_STRIP_ADDR=$(sym fx_strip) $VT)
     VHOOK=$(asm vhook_jump 0x18d14 0x18d18 --defsym=HOOK=$($LLVM/llvm-nm build/obj/video_cave.o | awk '$3 == "vhook" { print "0x" $1 }'))
     VFX_PATCHES="$VCAVE $VHOOK"
 fi
@@ -173,7 +173,16 @@ if [ "$EXIF" = "1" ]; then
     python3 -I tools/exif.py asm > build/obj/exif.inc
     ECAVE=$(asm exif_cave 0xbb3f8 0xbb774)
     EJUMP=$(asm exif_jump 0x18328 0x1832c --defsym=HOOK=$(nmsym exif_cave exif_write))
-    EXIF_PATCHES="$ECAVE $EJUMP"
+    # Videos: UTC dates (the stock firmware takes off 8 h) on the movie and its tracks.
+    MOV_OFFSET=$(python3 -I -c "import sys; s=sys.argv[1]; h,m=s[1:].split(':'); print((-1 if s[0]=='-' else 1)*(int(h)*3600+int(m)*60))" "${EXIF_OFFSET:-+05:30}")
+    MTIME=$(asm mov_time 0x88180 0x88194 --defsym=MOV_OFFSET=$MOV_OFFSET)
+    # Videos: make, model and artist (udta), in the end of the video cave's dead range.
+    python3 -I tools/exif.py udta > build/obj/udta.inc
+    MMETA=$(asm mov_meta 0xbbaa0 0xbbb08)
+    MHOOK=$(nmsym mov_meta mov_meta)
+    MJUMP1=$(asm bl_jump 0x8c910 0x8c914 --defsym=AT=0x8c910 --defsym=HOOK=$MHOOK)
+    MJUMP2=$(asm bl_jump 0x8ca1c 0x8ca20 --defsym=AT=0x8ca1c --defsym=HOOK=$MHOOK)
+    EXIF_PATCHES="$ECAVE $EJUMP $MTIME $MMETA $MJUMP1 $MJUMP2"
 fi
 # Resolution jump table @0xf3d0 (ldrls pc,[pc,idx,lsl#2] @0xf3c8): entries hold
 # absolute handler addresses, so point each photo aspect ratio straight at its
