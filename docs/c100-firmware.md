@@ -2,10 +2,10 @@
 
 _Last updated 2026-11-05_
 
-**Now (`v030`):** three modes on the center button, `nor` → `CCD` → `Y2K`:
+**Now (`v031`):** three modes on the center button, `nor` → `CCD` → `Y2K`:
 the factory camera, and two early-2000s digicam looks done in the camera's
-own ISP (full resolution, hardware JPEG), with an orange `05 11 '26` date
-stamp (DD MM 'YY) in the corner of every digicam photo. Synthesized digicam
+own ISP (full resolution, hardware JPEG), with a clean orange `05 11 '26`
+date stamp (DD MM 'YY) in the corner of every digicam photo. Synthesized digicam
 sounds (shutter "ka-chak", power-on chime, mode click). EXIF in every photo,
 UTC dates in videos, and [`rASHIM` on the display at boot](#boot-splash) in
 place of the GODOX logo.
@@ -19,7 +19,7 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | Feature | State |
 |---|---|
 | [Digicam modes](#digicam-modes) CCD and Y2K: gamma curves and colour matrix per mode in the ISP | on the camera, working (`v028`, 2026-11-05) |
-| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | on the camera, working (`v029`, 2026-11-05, IMG_0031–0036, 16:9 and 1:1) |
+| [Date stamp](#the-date-stamp) `DD MM 'YY`, bottom right, digicam modes only, drawn in the strip hook | on the camera (`v029`, IMG_0031–0036); clean italic digits `v031`, emulator |
 | [Sounds](#sounds): shutter, power-on chime, mode click (`tools/sounds.py`) | emulator (`v029`) |
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
@@ -188,6 +188,8 @@ which shifts every address after them).
   IMG_0031–0036).
 - `v030_splash.bin` — `rASHIM` at boot instead of the GODOX logo, the story
   removed. Emulator only so far.
+- `v031_stamp.bin` — the clean stamp: italic, anti-aliased seven-segment
+  digits, 1.35× larger, solid on bright ground. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -210,7 +212,7 @@ at `0x15448` and returns to `0x1544c`).
 (verified against all B/BL targets and pointers, ARM and Thumb): `hook` at
 `0xbab6c` (fixed: `hook_jump.s` branches here), `snap`, `isp_profile`, the
 stamp's `pair`/`glyph`/`fill`, `PROFILES`, `VARS`, the glyph tables and the
-two modes' gamma and matrix tables; ends `0xbb198` (~420 B free).
+two modes' gamma and matrix tables; ends `0xbb2f6` (74 B free).
 
 **Display cave** (`lcd_cave.s`) — `0xbc400–0xbc660`, in the dead range
 `0xbb774–0xbc744` (unreferenced functions `FUN_000bb774…FUN_000bc19c`):
@@ -307,32 +309,46 @@ video until the next `nor` photo resets it.
 
 ### The date stamp
 
-A digicam's orange date in the bottom right corner: `05 11 '26` (day, month,
-apostrophe, year), seven-segment digits slanted like the old LED stamps, an
-orange core with a soft glow. Only in CCD and Y2K, and only if the clock is
-set (`GETTIME` `0x52bd4` returns 0).
+A digicam's date imprint in the bottom right corner: `05 11 '26` (day,
+month, apostrophe, year) in italic seven-segment digits with pointed ends and
+hairline gaps, anti-aliased, deep orange with a faint warm glow. Only in CCD
+and Y2K, and only if the clock is set (`GETTIME` `0x52bd4` returns 0).
 
 The firmware has a stamp of its own (enable byte `0x131bf8`, drawn by
 `FUN_00019568`), but it never showed on photos (`v028`), so the cave draws
 one:
 
-1. **`snap`** (per photo, camera task): allocates a 206×42 coverage buffer
+1. **`snap`** (per photo, camera task): allocates a 250×54 coverage buffer
    once (`pvPortMalloc` `0x5374c`), clears it, reads the RTC (`int t[7]` =
-   sec min hour mday mon year wday) and draws the glyphs into it: segments
-   `SEGS` (a–g and the apostrophe, 18×34 px digits), each grown by `RINGS`
-   (3 px at coverage 56, 1 px at 128, core 255) and sheared by `slant(y)`,
-   max-blended. Then sets `V_ON`.
+   sec min hour mday mon year wday) and draws the glyphs into it (`glyph`,
+   `seg`). Each segment of `SEGS` (a–g and the apostrophe; digits 26×46 px)
+   is a hexagon, `|across| ≤ TH` and `|along| + |across| ≤` its half length,
+   in 1/16 px. Per pixel of its box, row by row, `seg` takes the signed
+   distance from it, with the italic's shear (`SL`/256 per unit of height)
+   taken out of x, and looks up the coverage in `LUT` (255 inside, an
+   anti-aliased edge 255…128 over ±½ px, then the glow 88…0 out to 2.5 px),
+   max-blended. About 350k instructions (~1.1 ms) before the capture. Then
+   sets `V_ON`.
 2. **`hook`** (per strip, interrupt): reads the photo's W and H from the
    JPEG header template's SOF (`0xe2f50`, big-endian H at +7, W at +9), the
    stride (1.5 W) and the strip's rows from `STRIP_BYTES`, counts rows in
    `V_ROW`, and blends the buffer's rows that fall in this strip at
-   `MARGIN` = 40 px from the right and bottom: luma towards 176 where darker
-   (`blend_y`), chroma towards (60, 196) on even rows and columns
-   (`blend_c`), with cache invalidate/clean around it.
+   `MARGIN` = 40 px from the right and bottom (`blend_y`): coverage below
+   128 is glow and only lightens towards `STAMP_Y` (170); from 128 the core
+   lights as the glow's edge and then covers by `(c − 128) · 2`, also over
+   brighter ground, so the digits stay solid orange on white. Each 2×2
+   block's chroma goes towards (50, 202) by its four pixels' mean coverage
+   (`blend_c`). Cache invalidate/clean around it.
 
-`emu_digicam.py` checks the exact bytes against `digicam.apply_stamp`
-(including the clock not set, and a mode byte that isn't a mode). About 70k
-instructions per 32-row strip (~0.22 ms at ~310 M instructions/s).
+`digicam.py check()` asserts that `render` (every segment at every pixel)
+equals `render_boxed` (what the cave does) for several dates.
+`emu_digicam.py` checks the cave's buffer against `render` and the photo
+against `digicam.apply_stamp`, byte for byte (including the clock not set,
+and a mode byte that isn't a mode). Up to 125k instructions per 32-row strip
+(~0.40 ms at ~310 M instructions/s).
+
+`v029` had a blocky stamp: 18×34 px digits sheared in 6-row steps, square
+overlapping segments, flat glow rings that went brown on dark ground.
 
 ## EXIF
 
