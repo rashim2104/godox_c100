@@ -147,7 +147,7 @@ def main():
     assert profiles[0] == (0xd8050, 0xd6338)
     assert word(0x18d14) == 0xea000000 | ((vsym['vhook'] - 0x18d14 - 8) >> 2) & 0xffffff, 'frame hook jump'
     assert word(CALL_AT) == 0xeb000000 | ((vsym['rec_start'] - CALL_AT - 8) >> 2) & 0xffffff, 'record start jump'
-    ref = D.render(CLOCK[5], CLOCK[4], CLOCK[3])
+    ref = D.render(CLOCK[5], CLOCK[4], CLOCK[3], CLOCK[2], CLOCK[1])
     wY, wU, wV = Y0.copy(), UV0[..., 0].copy(), UV0[..., 1].copy()
     D.apply_stamp(wY, wU, wV, ref)
     ok, most = True, 0
