@@ -90,7 +90,10 @@ python3 -I tools/digicam.py asm > build/obj/digicam.inc
 nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
     $LLVM/llvm-nm "build/obj/$1.o" | awk -v s="$2" '$3 == s { print "0x" $1 }'
 }
-CAVE=$(asm digicam_cave 0xbab6c 0xbb340)
+# The modes' gamma and colour matrix tables (tools/patches/profile_data.s), in
+# the dead range 0xbbc00-0xbc400.
+PDATA=$(asm profile_data 0xbbc00 0xbc400)
+CAVE=$(asm digicam_cave 0xbab6c 0xbb340 --defsym=PROFILES=$(nmsym profile_data PROFILES))
 HOOK_JUMP=$(asm hook_jump 0x15448 0x1544c --defsym=HOOK=$(nmsym digicam_cave hook))
 CYC_JUMP=$(asm cyc_jump 0x187c4 0x187c8 --defsym=STUB=$(nmsym digicam_cave snap))
 LCAVE=$(asm lcd_cave 0xbc400 0xbc744)
@@ -127,5 +130,5 @@ fi
 NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES \
     $NORMAL_PATCHES $SPK_PATCHES

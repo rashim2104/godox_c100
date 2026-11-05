@@ -123,7 +123,7 @@ def main():
     Y0 = ycc[..., 0].copy()
     UV0 = (ycc[..., 1:].astype(int).reshape(H // 2, 2, W // 2, 2, 2).sum(axis=(1, 3)) // 4).astype(np.uint8)
     sym = symbols('build/obj/digicam_cave.o')
-    prof = sym['PROFILES']
+    prof = symbols('build/obj/profile_data.o')['PROFILES']
     fw = open(FW, 'rb').read()
     profiles = [struct.unpack_from('<2I', fw, APP + prof + 8 * k) for k in range(len(D.MODES))]
     assert profiles[0] == (0xd8050, 0xd6338)

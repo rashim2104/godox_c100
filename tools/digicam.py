@@ -340,7 +340,13 @@ def asm():
     for k in range(0, NLUT, 16):
         print('    .byte   ' + ', '.join(map(str, LUT[k:k + 16])))
     print('DIGITS:\n    .byte   ' + ', '.join(f'{d:#04x}' for d in DIGITS))
+    print('    .endm')
+    print('    .macro  PROFILE_DATA')
     print('    .align  2')
+    print('PROFILES:                               @ per mode: gamma, colour matrix (nor: the stock ones)')
+    print('    .word   0xd8050, 0xd6338')
+    for name in PROFILES:
+        print(f'    .word   GAMMA_{name} - base, CCM_{name} - base')
     for name, p in PROFILES.items():
         g = gamma(p)
         print(f'GAMMA_{name}:                           @ {name}: RGB gamma (0x90 bytes)')

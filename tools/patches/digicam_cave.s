@@ -272,7 +272,7 @@ stamp_draw:
 @ its capture, so nothing is cached. All registers preserved.
 isp_profile:
     push    {r0-r12, lr}
-    ldr     r2, =PROFILES - base
+    ldr     r2, =PROFILES                 @ profile_data.s (build.sh --defsym)
     add     r2, r2, r1, lsl #3
     ldm     r2, {r2, r3}
     ldr     r0, =ISP_CTX
@@ -432,10 +432,6 @@ seg:
     .ltorg
 
     .align  2
-PROFILES:                               @ gamma, colour matrix: stock (the calibration's), CCD, Y2K
-    .word   0xd8050, 0xd6338
-    .word   GAMMA_CCD - base, CCM_CCD - base
-    .word   GAMMA_Y2K - base, CCM_Y2K - base
 VARS:
     .word   0                             @ V_ROW
     .word   0                             @ V_BUF
