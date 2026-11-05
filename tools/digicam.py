@@ -160,27 +160,31 @@ NR_STOCK_LEVEL0 = (1, 3, 5, 6)
 
 def nr_table(low):
     """The YUV NR thresholds per gain level (36 shorts, 7 per level: three
-    fixed, then the four thresholds); low: every threshold 1."""
+    fixed, then the four thresholds); low: every threshold halved (min 1)."""
     fw = open(FW, 'rb').read()
     t = list(struct.unpack_from('<36H', fw, APP + NR_STOCK))
     if low:
         for lv in range(5):
-            t[lv * 7 + 3:lv * 7 + 7] = [1, 1, 1, 1]
+            t[lv * 7 + 3:lv * 7 + 7] = [max(1, v // 2) for v in t[lv * 7 + 3:lv * 7 + 7]]
     return t
 
 
-def look_calls(mode, profiles, lsc_before):
+def look_calls(mode, profiles, lsc_before, level=0):
     """What isp_profile calls after the gamma and matrix for mode index `mode`
-    (PROFILES at `profiles`), with ctx+0x17b0 at `lsc_before`: (name, args)."""
+    (PROFILES at `profiles`), with ctx+0x17b0 at `lsc_before` and the gain
+    tuner at `level` (ctx+0x1530, -1..3): (name, args)."""
     n = len(MODES)
     ampga, sharp, flags = LOOKS[MODES[mode]]
     lsc = profiles + 12 * n if flags & LOOK_LSC_OFF else LSC_STOCK
     nr = profiles + 12 * n + 8 if flags & LOOK_NR_LOW else NR_STOCK
-    out = [('edge', (ampga,)), ('sharp', (sharp,)), ('hbnr', (0 if flags & LOOK_HBNR_OFF else 1,)),
-           ('nr', (1, 1, 1, 1) if flags & LOOK_NR_LOW else NR_STOCK_LEVEL0)]
+    ints = (sharp, sharp - 3, sharp - 7, sharp - 10)
+    row = 7 * max(0, min(4, level + 1)) + 3
+    out = [('edge', (ampga,)), ('sharp', (ints[max(0, min(3, level))],)),
+           ('hbnr', (0 if flags & LOOK_HBNR_OFF else 1,)),
+           ('nr', tuple(nr_table(flags & LOOK_NR_LOW)[row:row + 4]))]
     if lsc != lsc_before:
         out.append(('lsc', (lsc,)))
-    return out, dict(sharp_ints=(sharp, sharp - 3, sharp - 7, sharp - 10), nr=nr, lsc=lsc)
+    return out, dict(sharp_ints=ints, nr=nr, lsc=lsc)
 
 
 def curves(p):

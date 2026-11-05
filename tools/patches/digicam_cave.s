@@ -294,6 +294,8 @@ isp_profile:
     cmp     r0, #0
     beq     1f
     mov     r6, r0                        @ r6 = the context
+    add     r10, r6, #0x1500
+    ldr     r10, [r10, #0x30]             @ r10 = the gain tuner's level, -1..3
     add     r0, r0, #0x1700
     str     r2, [r0, #0x7c]
     str     r3, [r0, #0x94]
@@ -316,6 +318,12 @@ isp_profile:
     str     r3, [r2, #0xa8]
     sub     r3, r0, #10
     str     r3, [r2, #0xac]
+    add     r2, r2, #0xa0
+    movs    r4, r10                       @ the gain for the tuner's level
+    movmi   r4, #0
+    cmp     r4, #3
+    movgt   r4, #3
+    ldr     r0, [r2, r4, lsl #2]
     mov     lr, pc
     b       SHARP_SET
     ldrb    r8, [r7, #2]                  @ r8 = flags
@@ -329,14 +337,17 @@ isp_profile:
     addne   r3, r9, #NMODES * 12 + 8      @ NR_LOW
     ldreq   r3, =0xd62e4
     str     r3, [r5, #0xa8]               @ the tuner's NR table
-    movne   r0, #1
-    movne   r1, #1
-    movne   r2, #1
-    movne   r3, #1
-    moveq   r0, #1
-    moveq   r1, #3
-    moveq   r2, #5
-    moveq   r3, #6
+    adds    r4, r10, #1                   @ its row for the tuner's level
+    movmi   r4, #0
+    cmp     r4, #4
+    movgt   r4, #4
+    lsl     r0, r4, #4
+    sub     r0, r0, r4, lsl #1
+    add     r3, r3, r0
+    ldrh    r0, [r3, #6]
+    ldrh    r1, [r3, #8]
+    ldrh    r2, [r3, #10]
+    ldrh    r3, [r3, #12]
     mov     lr, pc
     b       NR_SET
     tst     r8, #4
