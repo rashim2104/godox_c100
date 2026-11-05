@@ -204,7 +204,10 @@ which shifts every address after them).
   digits, 1.35× larger, solid on bright ground. Emulator only so far.
 - `v032_all.bin` — BW, NGT, SUN modes; per-mode sharpening, grain and
   vignette in the ISP; the mode's look and the stamp on video. Factory photo
-  size and quality. Emulator only so far.
+  size and quality. On the camera (IMG_0039–0044): stamp and video stamp
+  work; far too noisy indoors (NR at the bright level).
+- `v033_nr.bin` — NR and sharpening follow the tuner's gain level; grain
+  modes halve the thresholds instead of setting 1. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -347,12 +350,17 @@ options: `STAMP_ORDER` `dmy` (default) / `ymd` / `mdy`; `STAMP_TIME=1` adds
 Setters: edge `FUN_0009852c(ampga)`, sharpen `FUN_000914e8(gain)` plus the
 tuner's per-level ints at ctx+`0x14a0..0x14ac` (`g, g-3, g-7, g-10`), HbNr
 `FUN_000915b0(on)`, NR `FUN_00090af8` with the NR table pointer at
-ctx+`0x17a8` (stock `0xd62e4`, low = `NR_LOW` with thresholds 1), lens
+ctx+`0x17a8` (stock `0xd62e4`, low = `NR_LOW` with the thresholds halved), lens
 shading `FUN_00098810()` regenerated from the strengths at ctx+`0x17b0`
 (stock `0xd6a9c` = 25,25,25; `LSC_ZERO` = no correction, the lens's own
-falloff). `nor` restores stock (NR with level-0 values `1,3,5,6`).
-Risks, untested on hardware: the gain tuner `FUN_00091948` rewrites some of
-these when the AE gain level changes; `nor`'s NR restore uses level 0.
+falloff). `nor` restores stock.
+
+The gain tuner `FUN_00091948` keeps its level (−1 bright … 3 dark) at
+ctx+`0x1530` and applies that level's row of the NR table (thresholds
+1,3,5,6 / 3,5,7,9 / 6,8,12,14 / 8,12,14,16 / 10,28,30,42) and sharpen int
+only when the level changes, so `isp_profile` sends the row and int for the
+current level. `v032` sent the bright row at every level: indoors (level 3)
+NR was nearly off, ~45× stock noise in every mode (IMG_0039–0043).
 
 ### The ISP tables
 
