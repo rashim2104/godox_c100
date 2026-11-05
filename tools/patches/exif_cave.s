@@ -8,9 +8,12 @@
 @     SOI | APP1 (Exif) | the template after its SOI
 @
 @ The APP1 (tools/exif.py, exif.inc) is fixed apart from the photo's size,
-@ copied from the SOF0 (height at +7, width at +9, big-endian), and the date
+@ copied from the SOF0 (height at +7, width at +9, big-endian), the date
 @ from the RTC (FUN_00052bd4: 0, or -1 if the clock was never set, then a
-@ blank date as EXIF wants for unknown). write (FUN_000385a0) waits for the
+@ blank date as EXIF wants for unknown), and the exposure the sensor was
+@ last set to by the AE (FUN_0004c22c): lines at 0x1241a4 (x 30/1014000 s),
+@ gain x64 at 0x1241a0 (ISO = 100 x gain/64), and the white balance
+@ setting (0x132160 + 0x98, "temp_awb": 0 = auto). write (FUN_000385a0) waits for the
 @ file task to take the data, so one static APP1 is enough; it only runs in
 @ the camera task, once per photo, never in an interrupt.
 @
@@ -23,6 +26,9 @@ base:
     .set    WRITE,    base + 0x385a0      @ write(fd, buf, len)
     .set    GETTIME,  base + 0x52bd4      @ (int t[7]) sec min hour mday mon year wday
     .set    SNPRINTF, base + 0xce234
+    .set    AE_LINES, base + 0x1241a4
+    .set    AE_GAIN,  base + 0x1241a0
+    .set    WB_MODE,  base + 0x1321f8
     .equ    T, 20                         @ t[7] on the stack, after 5 varargs
 
     .org    0xbb3f8
@@ -41,10 +47,34 @@ exif_write:                               @ r0 = fd, r1 = template, r2 = 0x270
     orr     r0, r1, r0, lsl #8
     ldr     r3, =W
     strh    r0, [r6, r3]
+    ldr     r3, =W0
+    strh    r0, [r6, r3]
     ldrb    r0, [r5, #7]                  @ height
     ldrb    r1, [r5, #8]
     orr     r0, r1, r0, lsl #8
     ldr     r3, =H
+    strh    r0, [r6, r3]
+    ldr     r3, =H0
+    strh    r0, [r6, r3]
+
+    ldr     r3, =AE_LINES - base          @ ExposureTime = lines x 30 / 1014000
+    ldr     r0, [r3]
+    mov     r1, #30
+    mul     r2, r0, r1
+    ldr     r3, =EXPO
+    strh    r2, [r6, r3]
+    ldr     r3, =AE_GAIN - base           @ ISO = gain x 100/64 = gain x 25/16
+    ldr     r0, [r3]
+    mov     r1, #25
+    mul     r2, r0, r1
+    lsr     r2, r2, #4
+    ldr     r3, =ISO
+    strh    r2, [r6, r3]
+    ldr     r3, =WB_MODE - base           @ 0 auto, else a preset: manual
+    ldrb    r0, [r3]
+    subs    r0, r0, #0
+    movne   r0, #1
+    ldr     r3, =WHITE_BALANCE
     strh    r0, [r6, r3]
 
     add     r0, sp, #T
@@ -70,16 +100,13 @@ exif_write:                               @ r0 = fd, r1 = template, r2 = 0x270
     mov     r1, #20
     mov     lr, pc
     b       SNPRINTF
-    ldr     r0, =DATE0                    @ the same date in DATE1 and DATE2
+    ldr     r0, =DATE0                    @ the same date in DATE1
     add     r0, r6, r0
     ldr     r1, =DATE1
     add     r1, r6, r1
-    ldr     r2, =DATE2
-    add     r2, r6, r2
     mov     r3, #20
 2:  ldrb    ip, [r0], #1
     strb    ip, [r1], #1
-    strb    ip, [r2], #1
     subs    r3, r3, #1
     bne     2b
 

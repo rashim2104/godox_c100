@@ -2,12 +2,20 @@
 
     python3 -I tools/exif.py asm > build/obj/exif.inc
 
-Little-endian TIFF with IFD0 (resolution, make, model, software, date,
-artist) and an Exif IFD (version, the dates, their UTC offsets, colour space,
-pixel size). Per photo, the camera fills in the three dates (DateTime,
-DateTimeOriginal, CreateDate: DATE0..2) and the pixel size (W, H); their
-offsets in APP1 come out as equs. No value is shared between tags
-(exiftool -validate flags overlaps), and it passes with no warnings.
+Little-endian TIFF with IFD0 (size, resolution, make, model, software,
+artist) and an Exif IFD (exposure, f-number, ISO, version, DateTimeOriginal,
+CreateDate, OffsetTimeOriginal, colour space, pixel size, white balance).
+Per photo, the camera fills in the two dates (DATE0, DATE1), the size (W0/H0 in IFD0, W/H in
+the Exif IFD), the exposure time's numerator (EXPO, over 1014000 s), ISO
+and WHITE_BALANCE; their offsets in APP1 come out as equs.
+
+Exposure, from the firmware (see docs, EXIF): the GC2083 AE table steps in
+10 ms anti-banding units of 338 lines, 1014 lines = 30 ms, so a line is
+0.030/1014 s (also 1/(30 fps x 1125 lines VTS)). ISO is the firmware's own
+light-meter convention, 100 x gain/64. f/2.4 is the lens f-number the
+light meter uses (double at 0x21a5c). No value is shared between tags
+(exiftool -validate flags overlaps); IFD0 ImageWidth/ImageHeight are kept
+on purpose and give exiftool's two minor "not allowed in JPEG" warnings.
 Settings from the environment: EXIF_MAKE, EXIF_MODEL, EXIF_SOFTWARE,
 EXIF_ARTIST, EXIF_OFFSET (the camera has no time zone, so it is fixed here).
 """
@@ -16,6 +24,7 @@ import os, struct, sys
 ASCII, SHORT, LONG, RATIONAL, UNDEFINED = 2, 3, 4, 5, 7
 SIZE = {ASCII: 1, SHORT: 2, LONG: 4, RATIONAL: 8, UNDEFINED: 1}
 DATE_LEN = 20  # "YYYY:MM:DD HH:MM:SS\0"
+EXPO_DEN = 1014000  # ExposureTime = lines * 30 / EXPO_DEN s
 
 
 def cfg():
@@ -35,28 +44,31 @@ def build(c=None, width=0, height=0, date=b'    :  :     :  :  '):
     date = date.ljust(DATE_LEN - 1)[:DATE_LEN - 1] + b'\0'
 
     ifd0 = [
+        (0x0100, LONG, 1, 'W0', struct.pack('<I', width)),
+        (0x0101, LONG, 1, 'H0', struct.pack('<I', height)),
         (0x010f, ASCII, None, None, asc(c['make'])),
         (0x0110, ASCII, None, None, asc(c['model'])),
         (0x011a, RATIONAL, 1, None, struct.pack('<II', 72, 1)),
         (0x011b, RATIONAL, 1, None, struct.pack('<II', 72, 1)),
         (0x0128, SHORT, 1, None, struct.pack('<H', 2)),
         (0x0131, ASCII, None, None, asc(c['software'])),
-        (0x0132, ASCII, None, 'DATE0', date),
         (0x013b, ASCII, None, None, asc(c['artist'])),
         (0x0213, SHORT, 1, None, struct.pack('<H', 1)),
         (0x8769, LONG, 1, 'EXIF_IFD', b'\0' * 4),
     ]
     exif = [
+        (0x829a, RATIONAL, 1, 'EXPO', struct.pack('<II', 0, EXPO_DEN)),
+        (0x829d, RATIONAL, 1, None, struct.pack('<II', 24, 10)),
+        (0x8827, SHORT, 1, 'ISO', struct.pack('<H', 0)),
         (0x9000, UNDEFINED, 4, None, b'0232'),
-        (0x9003, ASCII, None, 'DATE1', date),
-        (0x9004, ASCII, None, 'DATE2', date),
-        (0x9010, ASCII, None, None, asc(c['offset'])),
+        (0x9003, ASCII, None, 'DATE0', date),
+        (0x9004, ASCII, None, 'DATE1', date),
         (0x9011, ASCII, None, None, asc(c['offset'])),
-        (0x9012, ASCII, None, None, asc(c['offset'])),
         (0x9101, UNDEFINED, 4, None, bytes([1, 2, 3, 0])),
         (0xa001, SHORT, 1, None, struct.pack('<H', 1)),
         (0xa002, LONG, 1, 'W', struct.pack('<I', width)),
         (0xa003, LONG, 1, 'H', struct.pack('<I', height)),
+        (0xa403, SHORT, 1, 'WHITE_BALANCE', struct.pack('<H', 0)),
     ]
     ifd_len = lambda ifd: 2 + 12 * len(ifd) + 4
     ifd0_at = 8
