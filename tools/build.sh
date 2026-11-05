@@ -120,6 +120,19 @@ if [ "$EXIF" = "1" ]; then
     MJUMP2=$(asm bl_jump 0x8ca1c 0x8ca20 --defsym=AT=0x8ca1c --defsym=HOOK=$MHOOK)
     EXIF_PATCHES="$ECAVE $EJUMP $MTIME $MMETA $MJUMP1 $MJUMP2"
 fi
+# Photo sizes and JPEG quality (tools/photo.py; unset = the factory's).
+#   SIZE43=1280x960 SIZE169=1280x720 ...  one per aspect setting, downscales only:
+#     tools/patches/size_cave.s, in the dead 0xbb340-0xbb3f8, takes that
+#     aspect's slots of the photo size table (0xf3d0). Video stays stock.
+#   JPEG_Q=80   the photo encoder's IJG quality (FUN_00011724's three movs).
+SIZE_PATCHES=$(python3 -I tools/photo.py quality)
+if [ -n "${SIZE169}${SIZE32}${SIZE43}${SIZE11}" ]; then
+    python3 -I tools/photo.py asm > build/obj/size.inc
+    SCAVE=$(asm size_cave 0xbb340 0xbb3f8)
+    SLOTS=$(python3 -I tools/photo.py patches $(nmsym size_cave sz169) $(nmsym size_cave sz32) \
+        $(nmsym size_cave sz43) $(nmsym size_cave sz11))
+    SIZE_PATCHES="$SIZE_PATCHES $SCAVE $SLOTS"
+fi
 # Every mode takes the factory's sizes. Until v028 the normal mode had aspect
 # slots of its own (6, 7, 8, 10 and 13), and a camera can still have one
 # saved: their entries in both size tables (photo @0xf3d0, video @0xf0a0) stay
@@ -128,4 +141,4 @@ NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f7000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
     "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES \
-    $NORMAL_PATCHES $SPK_PATCHES
+    $NORMAL_PATCHES $SPK_PATCHES $SIZE_PATCHES
