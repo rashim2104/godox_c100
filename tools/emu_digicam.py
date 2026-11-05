@@ -6,10 +6,11 @@ emulator and check it against tools/digicam.py.
 
 Loads build/GP_CARDVR_UPGRADE.BIN and stubs the firmware calls the cave makes
 (cache maintenance, pvPortMalloc, the RTC, the ISP's gamma and colour matrix
-reloads, which record what the ISP context points at). Per mode (nor, CCD,
-Y2K, a value that is not a mode, and CCD with the clock not set):
+reloads, which record what the ISP context points at). Per mode (every one
+of digicam.MODES, a value that is not a mode, and CCD with the clock not set):
   1. runs snap (the per-photo entry): the ISP must get the mode's profile,
-     and in CCD/Y2K the stamp buffer must be digicam.render of the clock;
+     and in every mode but nor the stamp buffer must be digicam.render of the
+     clock;
   2. packs the photo (at its own size, as the factory's) into 32-row strips
      in the camera's YUV 4:2:0 layout, alternating strip A and B, and runs the
      strip hook on each; the result must be the photo with digicam.apply_stamp
@@ -128,7 +129,7 @@ def main():
     profiles = [struct.unpack_from('<2I', fw, APP + prof + 8 * k) for k in range(len(D.MODES))]
     assert profiles[0] == (0xd8050, 0xd6338)
     ok, most = True, 0
-    for mode, clock_set in [(0, True), (1, True), (2, True), (7, True), (1, False)]:
+    for mode, clock_set in [(m, True) for m in range(len(D.MODES))] + [(7, True), (1, False)]:
         k = mode if mode < len(D.MODES) else 0
         uc, calls = machine(clock_set)
         steps = [0]

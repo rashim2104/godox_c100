@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The camera's modes (nor, CCD, Y2K): their ISP profiles, display codes and
+"""The camera's modes (nor, CCD, Y2K, BW, NGT, SUN): their ISP profiles, display codes and
 the digicam date stamp. Generates digicam.inc for the caves and is the exact
 reference the emulator check (emu_digicam.py) compares the firmware against.
 
@@ -24,12 +24,12 @@ into the photo's bottom right by the strip hook: luma by blend_y (the glow only
 lightens, the core covers), each 2x2 block's chroma toward STAMP_U/V by its
 mean coverage.
 """
-import struct, sys
+import os, struct, sys
 
-FW = 'build_backups/v001_original.bin'
+FW = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'build_backups/v001_original.bin')
 APP = 0x10200
 GAMMA_AT, CCM_AT = 0xd8050, 0xd6338
-MODES = ['nor', 'CCD', 'Y2K']
+MODES = ['nor', 'CCD', 'Y2K', 'BW', 'NGT', 'SUN']
 
 
 def stock():
@@ -87,9 +87,56 @@ def y2k_cast(y):
     return rgb_offset(dcb, dcr)
 
 
+# BW: punchy black and white. No colour at all (the matrix's rows are the luma
+# weights), black point 8, white 248, a strong S-curve, a faint warm paper
+# tone in the mid-tones.
+def bw_tone(v):
+    y = clamp((v - 8) / 240, 0, 1)
+    y += 0.7 * y * (1 - y) * (2 * y - 1)
+    return 255 * y
+
+
+def bw_cast(y):
+    w = 4 * (y / 255) * (1 - y / 255)
+    return tuple(d * w for d in rgb_offset(-1.0, 0.8))
+
+
+# NGT: a cold night. Blacks crushed below 14, the mids pushed down (power
+# 1.4), white held at 245, a teal-blue cast that fades in from black (so
+# black stays black) and eases off in the highlights, saturation x0.8.
+def ngt_tone(v):
+    y = clamp((v - 14) / 236, 0, 1)
+    return 245 * y ** 1.4
+
+
+def ngt_cast(y):
+    w = min(1, 3 * y / 255) * (1 - 0.5 * y / 255)
+    return tuple(d * w for d in rgb_offset(9, -6))
+
+
+# SUN: a disposable film camera in the sun. Lifted blacks (18), bright mids,
+# a soft shoulder to 246, a golden cast (more yellow in the highlights, a
+# touch of red in the shadows), saturation x1.1.
+SUN_POINTS = [(0, 18), (32, 46), (64, 80), (96, 114), (128, 146), (160, 177), (192, 205),
+              (224, 229), (255, 246)]
+
+
+def sun_tone(v):
+    return interp(SUN_POINTS, v)
+
+
+def sun_cast(y):
+    s = max(0, 1 - y / 128)
+    h = max(0, (y - 128) / 127)
+    return rgb_offset(-10 - 6 * h, 5 + 2 * s)
+
+
 PROFILES = {
     'CCD': dict(tone=ccd_tone, cast=ccd_cast, sat=(1.15, 1.15, 1.15)),
     'Y2K': dict(tone=y2k_tone, cast=y2k_cast, sat=(0.9, 0.85, 0.9)),
+    'BW': dict(tone=bw_tone, cast=bw_cast, sat=(0, 0, 0)),
+    'NGT': dict(tone=ngt_tone, cast=ngt_cast, sat=(0.8, 0.8, 0.8)),
+    'SUN': dict(tone=sun_tone, cast=sun_cast, sat=(1.1, 1.1, 1.1)),
 }
 
 
@@ -128,10 +175,12 @@ def ccm(p):
 
 
 # ---- The display: the mode's code on the shutter-speed (SS) readout's three
-# 7-segment cells, blank in photo and video mode. ----
+# 7-segment cells, blank in photo and video mode. A code is one glyph per
+# cell; W takes two cells, its left half 'W<' and right half 'W>'. ----
 SEG7 = {'n': 'ceg', 'o': 'cdeg', 'r': 'eg', 'C': 'adef', 'd': 'bcdeg', 'Y': 'bcdfg', '2': 'abdeg',
-        'K': 'acefg'}
-LCD = {'nor': 'nor', 'CCD': 'CCd', 'Y2K': 'Y2K'}
+        'K': 'acefg', 'b': 'cdefg', 'W<': 'cdef', 'W>': 'bcde', 'G': 'acdef', 't': 'defg',
+        'S': 'acdfg', 'U': 'bcdef'}
+LCD = {'nor': 'nor', 'CCD': 'CCd', 'Y2K': 'Y2K', 'BW': ['b', 'W<', 'W>'], 'NGT': 'nGt', 'SUN': 'SUn'}
 # Segment -> (HT1621 address, COM) for each 7-segment cell, left to right:
 # ISO 1-2, F 1-2, SS 1-3, found by running the firmware's digit routines
 # (FUN_00049ea8, FUN_0004a4ec, FUN_0004a074, FUN_0004a374, FUN_0004a1f0) for
@@ -364,7 +413,9 @@ def preview(src, prefix):
     from PIL import Image
     im = Image.open(src).convert('RGB')
     L = (0.299, 0.587, 0.114)
-    for name, p in PROFILES.items():
+    names = sys.argv[4:] or PROFILES
+    for name in names:
+        p = PROFILES[name]
         t = curves(p)
         px = im.load()
         out = Image.new('RGB', im.size)
@@ -389,11 +440,25 @@ def check():
         rows = ccm(p)
         for r in range(3):
             assert abs(sum(rows[r * 3:r * 3 + 3]) - sum(m[r * 3:r * 3 + 3])) <= 2, (name, r)
+    assert list(PROFILES) == MODES[1:]
+    assert len(set(SEG7.values())) == len(SEG7)        # emu_seg reads glyphs back
+    assert all(len(LCD[m]) == len(SS_CELLS) for m in MODES)
     t = curves(PROFILES['CCD'])
     assert t[1][5] == 0 and t[1][240] == 255          # crushed blacks, hard clip
     t = curves(PROFILES['Y2K'])
     assert 20 <= t[1][0] <= 24 and t[1][255] <= 242   # lifted blacks, soft white
     assert t[0][128] > t[2][128]                      # warm
+    rows = ccm(PROFILES['BW'])
+    assert rows[0:3] == rows[3:6] == rows[6:9]        # no colour
+    t = curves(PROFILES['BW'])
+    assert t[1][8] == 0 and t[1][248] == 255 and t[1][64] < 50 and t[1][192] > 205   # punchy
+    assert 0 <= t[0][128] - t[2][128] <= 4                                         # near neutral
+    t = curves(PROFILES['NGT'])
+    assert all(t[c][14] == 0 for c in range(3)) and t[1][128] < 112 and t[1][255] <= 246
+    assert t[2][128] > t[0][128] + 6                  # cold
+    t = curves(PROFILES['SUN'])
+    assert 16 <= t[1][0] <= 20 and t[1][255] <= 248 and t[1][128] > 140
+    assert t[0][128] > t[2][128] + 15 and t[1][200] > t[2][200]   # golden
     b = render(2026, 11, 5)
     assert b == render_boxed(2026, 11, 5) == render_boxed(2026, 11, 5)
     for date in [(2088, 12, 28), (2000, 1, 1), (2099, 8, 30)]:

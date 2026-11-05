@@ -1,12 +1,12 @@
-@ The digicam modes (tools/digicam.py): nor, CCD and Y2K, chosen with the
-@ center button (lcd_cave.s; the mode is byte 0xf1 of the camera's saved
-@ settings, anything else counts as nor). Every mode takes the factory's
-@ sizes.
+@ The digicam modes (tools/digicam.py): nor, CCD, Y2K, BW, NGT and SUN,
+@ chosen with the center button (lcd_cave.s; the mode is byte 0xf1 of the
+@ camera's saved settings, anything else counts as nor). Every mode takes the
+@ factory's sizes.
 @
 @ snap (cyc_jump.s: FUN_000187c4, the capture handler, once per photo,
-@ camera task): hand the ISP the mode's profile (isp_profile), and in CCD or
-@ Y2K render the date stamp, "DD MM 'YY" from the RTC, into a coverage buffer
-@ (SW x SH bytes, allocated once).
+@ camera task): hand the ISP the mode's profile (isp_profile, tables in
+@ profile_data.s), and in every mode but nor render the date stamp, "DD MM
+@ 'YY" from the RTC, into a coverage buffer (SW x SH bytes, allocated once).
 @
 @ hook (hook_jump.s: FUN_00015448, the scaler's "strip ready" callback,
 @ interrupt): each call hands over one finished strip (FUN_0001523c queues one
@@ -266,7 +266,7 @@ stamp_draw:
 8:  add     sp, sp, #28
     pop     {r1-r12, pc}
 
-@ ISP profile r1 (0 = stock, then CCD, Y2K): point the ISP context's gamma
+@ ISP profile r1 (0 = stock, then CCD, Y2K, BW, NGT, SUN): point the ISP context's gamma
 @ (+0x177c) and colour matrix (+0x1794) at its tables and reload both
 @ (FUN_000981fc, FUN_000982a4, as the ISP's init does). Every photo, before
 @ its capture, so nothing is cached. All registers preserved.
