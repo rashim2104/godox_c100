@@ -10,16 +10,20 @@ OUT=build/GP_CARDVR_UPGRADE.BIN
 mkdir -p build/obj
 
 # --- sounds ---
-# SILENT=1 makes the shutter, power-on and mode-switch click silent (same slots,
-# zeroed samples) AND never switches the speaker amplifier on (see SPK_PATCHES
+# By default the camera sounds like a 2000s compact (tools/sounds.py): a fake
+# "ka-chak" shutter, a rising power-on chime and a tick for the center
+# button's mode change. SILENT=1 makes them silent (same slots, zeroed
+# samples) AND never switches the speaker amplifier on (see SPK_PATCHES
 # below), so there is no amp hiss either.
+#   sh tools/build.sh            -> digicam sounds
 #   SILENT=1 sh tools/build.sh   -> no sounds, speaker amp stays off
-#   sh tools/build.sh            -> Super Mario kick / coin sounds
-# SHUTTER_WAV / POWERON_WAV pick other sounds (11025 Hz mono 16-bit PCM, at
-# most the slot's size; the site's editor makes these).
+# SHUTTER_WAV / POWERON_WAV / CLICK_WAV pick other sounds (11025 Hz mono
+# 16-bit PCM, at most the slot's size).
 SILENT=${SILENT:-0}
-SHUTTER_WAV=${SHUTTER_WAV:-build/kick_11k.wav}
-POWERON_WAV=${POWERON_WAV:-build/coin_11k.wav}
+python3 -I tools/sounds.py build/sounds
+SHUTTER_WAV=${SHUTTER_WAV:-build/sounds/shutter.wav}
+POWERON_WAV=${POWERON_WAV:-build/sounds/poweron.wav}
+CLICK_WAV=${CLICK_WAV:-build/sounds/click.wav}
 python3 tools/gp_res.py "$ORIG" build/res >/dev/null
 if [ "$SILENT" = "1" ]; then
     python3 -I tools/mk_silence.py "$SHUTTER_WAV" build/silent_cam.wav
@@ -31,6 +35,7 @@ if [ "$SILENT" = "1" ]; then
 else
     python3 tools/patch_res.py "$ORIG" CAMERA.wav "$SHUTTER_WAV" "$OUT"
     python3 tools/patch_res.py "$OUT" POWERON_AUDIO.wav "$POWERON_WAV" "$OUT"
+    python3 tools/patch_res.py "$OUT" CLICK.wav "$CLICK_WAV" "$OUT"
 fi
 
 # BEEP.wav (the UI/focus beep) is always silenced, in both sound profiles.
