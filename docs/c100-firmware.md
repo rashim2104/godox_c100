@@ -5,7 +5,7 @@ _Last updated 2026-11-05_
 **Now (`v032`):** six modes on the center button, `nor` → `CCD` → `Y2K` →
 `bW` → `nGt` → `SUn`: the factory camera, and five early-2000s digicam looks
 done in the camera's own ISP (full resolution, hardware JPEG; tone, colour,
-sharpening, grain and vignette per mode), with a clean orange `05 11 '26`
+vignette), with a clean orange `05 11 '26`
 date stamp (DD MM 'YY) in the corner of every digicam photo and video. Videos
 take the mode's look too. Photo size and JPEG quality are build options. Synthesized digicam
 sounds (shutter "ka-chak", power-on chime, mode click). EXIF in every photo,
@@ -27,13 +27,13 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
 | [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | emulator (`v030`) |
 | [More modes](#more-modes-and-stamp-options) BW, NGT, SUN; stamp order, time and colour as build options | emulator (`v032`) |
-| [ISP look](#the-isp-look-sharpening-grain-vignette): edge/sharpen gain, noise reduction, lens shading per mode | emulator, call level only (`v032`) |
+| [Vignette](#the-isp-look-vignette): lens shading off in the digicam modes | on the camera (`v032`) |
 | [Digicam modes on video](#digicam-modes-on-video): the mode's ISP profile and the date stamp in every frame | emulator (`v032`) |
 | [Photo sizes and JPEG quality](#photo-sizes-and-jpeg-quality): `SIZE*`, `JPEG_Q` | emulator (`v032`), factory by default |
 
 Contents: [The device](#the-device) · [Image layout](#firmware-image-layout-gp_cardvr_upgradebin-v116) ·
 [Tooling](#tooling) · [Backups](#backups-in-build_backups) · [Code caves and hooks](#code-caves-and-hooks) ·
-[Photos](#photos) · [Digicam modes](#digicam-modes) · [ISP look](#the-isp-look-sharpening-grain-vignette) · [EXIF](#exif) · [Video](#video) · [Sounds](#sounds) ·
+[Photos](#photos) · [Digicam modes](#digicam-modes) · [Vignette](#the-isp-look-vignette) · [EXIF](#exif) · [Video](#video) · [Sounds](#sounds) ·
 [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay) · [Ideas](#ideas-not-yet-done)
 
 ## The device
@@ -207,7 +207,10 @@ which shifts every address after them).
   size and quality. On the camera (IMG_0039–0044): stamp and video stamp
   work; far too noisy indoors (NR at the bright level).
 - `v033_nr.bin` — NR and sharpening follow the tuner's gain level; grain
-  modes halve the thresholds instead of setting 1. Emulator only so far.
+  modes halve the thresholds instead of setting 1. On the camera
+  (IMG_0045–0051): better, still 5–10× noisier than `v029`.
+- `v034_clean.bin` — sharpening and NR left to the camera; the digicam modes
+  keep only the vignette. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -247,7 +250,7 @@ branches, but `0x80c` is a timer callback passed at `0xcb8`, and `0xbf4` /
 libm code with a Thumb branch into it from `0xc609c`).
 
 **Profile data** (`profile_data.s`) — `0xbbc00–0xbc400`: `PROFILES`, the
-gamma/matrix tables, `LOOKS` (4 B per mode), `LSC_ZERO`, `NR_LOW`.
+gamma/matrix tables, `LSC_ZERO`.
 **Video look** (`video_look.s`) — `0xbb774–0xbbaa0`: `rec_start`, `vhook`.
 **Size cave** (`size_cave.s`) — `0xbb340–0xbb3b0`: the `SIZE*` stubs.
 Still free: `0xba74c–0xba91c`, `0xbbb08–0xbbc00`.
@@ -333,34 +336,23 @@ options: `STAMP_ORDER` `dmy` (default) / `ymd` / `mdy`; `STAMP_TIME=1` adds
 `14:07` after a gap; `STAMP_COLOR` `orange` / `red` / `yellow` / `green`.
 `emu_digicam.py` and `emu_video.py` must run with the same values as the build.
 
-### The ISP look: sharpening, grain, vignette
+### The ISP look: vignette
 
-`isp_profile` also programs the CDSP (MMIO `0xd0800000`) per mode from
-`LOOKS` (ampga, sharpen gain, flags):
+Every digicam mode turns lens shading off: `isp_profile` points the
+strengths at ctx+`0x17b0` at `LSC_ZERO` (stock `0xd6a9c` = 25,25,25) and
+regenerates the table with `FUN_00098810()`, so the corners keep the lens's
+own falloff; `nor` restores stock. Lens shading (CDSP MMIO `0xd0800000`) is
+only regenerated when the strengths change.
 
-| Mode | Edge ampga | Sharpen | HbNr off | NR low (grain) | LSC off (vignette) |
-|---|---|---|---|---|---|
-| nor | 0 | 0x20 | | | |
-| CCD | 2 | 0x40 | ✓ | ✓ | ✓ |
-| Y2K | 1 | 0x30 | | | ✓ |
-| BW | 2 | 0x40 | ✓ | ✓ | ✓ |
-| NGT | 1 | 0x20 | | ✓ | ✓ |
-| SUN | 0 | 0x20 | | | ✓ |
-
-Setters: edge `FUN_0009852c(ampga)`, sharpen `FUN_000914e8(gain)` plus the
-tuner's per-level ints at ctx+`0x14a0..0x14ac` (`g, g-3, g-7, g-10`), HbNr
-`FUN_000915b0(on)`, NR `FUN_00090af8` with the NR table pointer at
-ctx+`0x17a8` (stock `0xd62e4`, low = `NR_LOW` with the thresholds halved), lens
-shading `FUN_00098810()` regenerated from the strengths at ctx+`0x17b0`
-(stock `0xd6a9c` = 25,25,25; `LSC_ZERO` = no correction, the lens's own
-falloff). `nor` restores stock.
-
-The gain tuner `FUN_00091948` keeps its level (−1 bright … 3 dark) at
-ctx+`0x1530` and applies that level's row of the NR table (thresholds
-1,3,5,6 / 3,5,7,9 / 6,8,12,14 / 8,12,14,16 / 10,28,30,42) and sharpen int
-only when the level changes, so `isp_profile` sends the row and int for the
-current level. `v032` sent the bright row at every level: indoors (level 3)
-NR was nearly off, ~45× stock noise in every mode (IMG_0039–0043).
+Tried and dropped (`v032`, `v033`): per-mode sharpening (edge
+`FUN_0009852c`, sharpen `FUN_000914e8`), HbNr `FUN_000915b0` and lower NR
+thresholds `FUN_00090af8` for grain. Set at capture they override the
+capture path's own NR: `v032` sent the bright-light NR row at every gain
+level (~45× stock noise indoors, IMG_0039–0043); `v033` sent the gain tuner's
+current row (its level at ctx+`0x1530`, rows 1,3,5,6 / 3,5,7,9 / 6,8,12,14 /
+8,12,14,16 / 10,28,30,42 in the table at ctx+`0x17a8`) and was still 5–10×
+noisier than `v029`, even in `nor` (IMG_0045–0051). Grain, if wanted, belongs
+in the strip hook, not the ISP.
 
 ### The ISP tables
 

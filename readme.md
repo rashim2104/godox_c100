@@ -8,7 +8,7 @@ This fork turns it into a 2005 compact: the center button cycles `nor` (factory)
 
 ### Step 1
 
-Copy the file [`build_backups/v033_nr.bin`](./build_backups/v033_nr.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
+Copy the file [`build_backups/v034_clean.bin`](./build_backups/v034_clean.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
 
 _Either you connect via USB-C while the Godox is on, copy and rename the file, eject, and turn of the Godox; or you insert the SD card using a connector to your computer and then place it back in the turned-off Godox._
 
