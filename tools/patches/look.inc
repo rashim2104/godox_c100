@@ -1,6 +1,6 @@
-@ Shared by photo_cave.s and video_cave.s: the current look's state in the
+@ Shared by photo_cave.s and fx4.s: the current look's state in the
 @ photo cave's VARS (lut_fill sets it), and the per-block steps of fx_strip
-@ (photo_cave.s, 2x2 blocks; video_cave.s fx4, 4x4 blocks). tools/sim_look.py
+@ (photo_cave.s, 2x2 blocks; fx4.s, 4x4 blocks). tools/sim_look.py
 @ is the exact reference.
 
     .equ    LUT_PTR,     0                @ offsets into VARS: the table (after the row buffer and luma map)

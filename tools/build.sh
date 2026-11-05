@@ -77,7 +77,7 @@ print(f'{start:#x}:{old.hex()}:{new.hex()}')
 # Presets (match palettes x film colours) with their contrast and brightness,
 # rnd and the normal mode (no effect) on or off, tags and display codes from
 # tools/palettes.py (PRESETS_JSON), included by the caves. The preset data is too big for the
-# photo cave: it goes in the unused end of the video cave's dead range,
+# photo cave: it goes in the unused end of the fx4 cave's dead range,
 # 0xbbc00-0xbc400 (see tools/patches/preset_data.s).
 python3 -I tools/palettes.py asm > build/obj/palettes.inc
 nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
@@ -94,20 +94,9 @@ sym() {  # address of a label in the assembled photo cave
 }
 HOOK_JUMP=$(asm hook_jump 0x15448 0x1544c --defsym=HOOK=$(sym hook))
 CYC_JUMP=$(asm cyc_jump 0x187c4 0x187c8 --defsym=STUB=$(sym idx_stub))  # per-photo palette + table
-# Video palette dithering (VIDFX=1, default; VIDFX=0 = plain video): hook FUN_00018d14 (one 64-row video
-# strip -> H.264 encoder) into a second cave in dead code at 0xbb774-0xbbc00
-# (unreferenced functions FUN_000bb774..FUN_000bc19c; see
-# tools/patches/video_cave.s). It shares the photo cave's presets and table.
-# VIDTIMING=1 adds a per-strip timing bar (test builds only).
-VIDFX=${VIDFX:-1}
-VIDTIMING=${VIDTIMING:-0}
-VFX_PATCHES=""
-if [ "$VIDFX" = "1" ]; then
-    VT=""; [ "$VIDTIMING" = "1" ] && VT="--defsym=VIDTIMING=1"
-    VCAVE=$(asm video_cave 0xbb774 0xbbaa0 --defsym=LUT_FILL_ADDR=$(sym lut_fill) --defsym=PVARS_ADDR=$(sym VARS) --defsym=DRAW_TAG_ADDR=$(sym draw_tag) --defsym=FX_STRIP_ADDR=$(sym fx_strip) $VT)
-    VHOOK=$(asm vhook_jump 0x18d14 0x18d18 --defsym=HOOK=$($LLVM/llvm-nm build/obj/video_cave.o | awk '$3 == "vhook" { print "0x" $1 }'))
-    VFX_PATCHES="$VCAVE $VHOOK"
-fi
+# fx_strip's 4x4 blocks (FX_PIX4, the GBC preset) at a fixed 0xbb774, in the
+# dead FUN_000bb774 (tools/patches/fx4.s).
+FX4CAVE=$(asm fx4 0xbb774 0xbbaa0 --defsym=PVARS_ADDR=$(sym VARS))
 # Preset mode on the see-through display and the center button (LCDTAG=1,
 # default; LCDTAG=0 = stock blank display, center button does nothing, always
 # the first preset): in photo and video mode the center button cycles the
@@ -138,7 +127,7 @@ fi
 # and tools/patches/story_cave.s. Caves in the rest of the dead code: the
 # drawing at 0xba74c-0xba91c (dead FUN_000ba74c), the file at 0xbb340-0xbb3f8
 # (the end of the photo cave's dead function), the hooks at 0xbbb08-0xbbc00
-# (the end of the video cave's) and the font at 0xbc660-0xbc744 (the end of
+# (the end of the fx4 cave's) and the font at 0xbc660-0xbc744 (the end of
 # the display cave's). Hooks: the card mount (bl at 0x3e03c), the display
 # refresh (b at its start, 0x21318: only the line, nothing else, during the
 # story), the arrows' and center's posts (bl at 0x1dd44, 0x1deac, 0x1ddf8)
@@ -176,7 +165,7 @@ if [ "$EXIF" = "1" ]; then
     # Videos: UTC dates (the stock firmware takes off 8 h) on the movie and its tracks.
     MOV_OFFSET=$(python3 -I -c "import sys; s=sys.argv[1]; h,m=s[1:].split(':'); print((-1 if s[0]=='-' else 1)*(int(h)*3600+int(m)*60))" "${EXIF_OFFSET:-+05:30}")
     MTIME=$(asm mov_time 0x88180 0x88194 --defsym=MOV_OFFSET=$MOV_OFFSET)
-    # Videos: make, model and artist (udta), in the end of the video cave's dead range.
+    # Videos: make, model and artist (udta), in the end of the fx4 cave's dead range.
     python3 -I tools/exif.py udta > build/obj/udta.inc
     MMETA=$(asm mov_meta 0xbbaa0 0xbbb08)
     MHOOK=$(nmsym mov_meta mov_meta)
@@ -190,24 +179,14 @@ fi
 jt() {  # jt ENTRY OLDHEX LABEL -> ENTRY:OLDHEX:<label address, little-endian>
     printf '%s:%s:%s\n' "$1" "$2" "$(python3 -I -c "import sys; print(int(sys.argv[1], 0).to_bytes(4, 'little').hex())" "$(sym "$3")")"
 }
-# Video resolution jump table @0xf0a0 (ldrls pc,[pc,idx,lsl#2] @0xf098), same
-# scheme as the photo one; video follows the camera's aspect setting:
-# 0/1/9 = 16:9 1920, 2 = 3:2 1616, 3 = 4:3 1440, 4 = 1:1 1024, each to the
-# photo's size (palettes.py SIZES, ~274k pixels; 640 wide until v019).
-# SMALLVID=0 keeps the stock full-size video.
-SMALLVID=${SMALLVID:-1}
 # The normal mode uses the factory's sizes: its aspects are slots 6, 7,
-# 8, 10 and 13 (lcd_cave.s NIDX), whose entries in both tables become the factory
-# handlers of aspects 0-4, copied from the original (nothing else uses those slots).
-NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000"
-VID_PATCHES=""
-if [ "$SMALLVID" = "1" ]; then
-    NORMAL_PATCHES="$NORMAL_PATCHES 0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
-    VID_PATCHES="$(jt 0xf0a0 f8f50000 vid169) $(jt 0xf0a4 f8f50000 vid169) $(jt 0xf0c4 f8f50000 vid169)
-        $(jt 0xf0a8 a8f60000 vid32) $(jt 0xf0ac 88f60000 vid43) $(jt 0xf0b0 98f60000 vid11)"
-fi
+# 8, 10 and 13 (lcd_cave.s NIDX), whose entries in both tables (photo @0xf3d0,
+# video @0xf0a0) become the factory handlers of aspects 0-4, copied from the
+# original (nothing else uses those slots).
+NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
+    0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" $VFX_PATCHES $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" "$FX4CAVE" $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES \
     "$(jt 0xf3d0 9cf70000 stub169)" \
     "$(jt 0xf3d4 9cf70000 stub169)" \
     "$(jt 0xf3d8 b0f70000 stub32)" \
@@ -216,5 +195,4 @@ python3 tools/patch_code.py "$OUT" "$OUT" \
     $NORMAL_PATCHES \
     "$(jt 0xf3fc 60f70000 photo43)" \
     "$(jt 0xf400 74f70000 photo43)" \
-    $VID_PATCHES \
     $SPK_PATCHES

@@ -10,7 +10,7 @@
 @ Artist) to the buffer and return its length. The table stays empty, so
 @ the muxer's close (FUN_0008ecd0, which frees its entries) is unchanged.
 @
-@ In the end of the video cave's dead range, after video_cave.s.
+@ In the end of the fx4 cave's dead range, after fx4.s.
     .syntax unified
     .arm
     .org    0xbbaa0

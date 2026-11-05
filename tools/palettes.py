@@ -33,8 +33,7 @@ LUT = (3, 3)  # camera lookup-table steps: Y and U/V in bins of 2^3 (photo_cave.
 # exactly 0.3667 of the full 1920x1080, 4:3 0.4222 of 1440x1080, 1:1 0.5156
 # of 1024x1024, 3:2 0.396 of 1616x1080 (0.07% off, as before). The crop is
 # only two numbers in the size struct; 1616 is the stock 3:2 crop (the
-# multiple of 16 nearest 1620). Video uses the same sizes since v020 (before:
-# 640 wide at every aspect); its hook takes any multiple of 16 up to MAX_W.
+# multiple of 16 nearest 1620). Video keeps the stock sizes.
 SIZES = {
     '16:9': ((1920, 1080), (704, 396)),
     '3:2':  ((1616, 1080), (640, 428)),
@@ -616,7 +615,6 @@ def main():
             assert ow % 16 == 0 and oh % 4 == 0 and cw % 16 == 0 and ow <= 1020
             print(f'    .equ    P{k}_W, {ow}\n    .equ    P{k}_H, {oh}\n'
                   f'    .equ    P{k}_CW, {cw}\n    .equ    P{k}_CH, {ch}      @ photo {name}: output, crop')
-        print(f'    .equ    MAX_W, {max(o[0] for _, o in sizes.values())}           @ widest output (video hook)')
         print(f'    .equ    TAG_ROWS, {TAG_ROWS}')
         print(f'    .equ    TAG_COLS, {TAG_COLS}')
         print(f'    .equ    TAG_SCALE, {TAG_SCALE}')

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """The exact reference of a look on one strip, integer for integer as the
-firmware does it (photo_cave.s lut_fill, video_cave.s fx_strip), for the
-emulator checks (emu_cave.py, emu_video.py) and the editor's preview
-(site/editor/sim.js, checked against this by tools/look_check.mjs).
+firmware does it (photo_cave.s lut_fill and fx_strip, fx4.s), for the
+emulator check (emu_cave.py).
 
 A strip is the camera's: Y per pixel (rows x W), U and V per 2x2 block (one
 pair per block, rows/2 x W/2 x 2); rows a multiple of 4, starting on a 64-row

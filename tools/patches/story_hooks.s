@@ -1,6 +1,6 @@
 @ The story's hooks (see story_cave.s); each is the stock code
-@ unless a story is on (LINE != 0). In the free end of the video cave,
-@ 0xbbb08-0xbbc00 (the video cave ends there with VIDTIMING=1).
+@ unless a story is on (LINE != 0). In the free end of the fx4 cave's
+@ dead range, 0xbbb08-0xbbc00.
 @
 @ The three short-press keys (FUN_0001dcb8 left arrow, FUN_0001dd6c center,
 @ FUN_0001de20 right arrow) each post 0x7018 and then their own message,
