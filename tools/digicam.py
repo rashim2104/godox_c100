@@ -18,10 +18,11 @@ stock curve: knot_c = T_c(stock knot), so T_c works on display values.
 CCM (0xd6338): 9 signed shorts, row-major, 0x80 = 1.0 (each row sums ~128).
 A profile is S(sat) . stock, S keeping luma (BT.601 weights) per row.
 
-Stamp: "DD MM 'YY" in slanted 7-segment digits with a two-ring glow, rendered
-once per photo into an SW x SH coverage buffer (0..255), then blended into the
-photo's bottom right by the strip hook: luma toward STAMP_Y (never darker),
-each 2x2 block's chroma toward STAMP_U/V, by the coverage of its top-left pixel.
+Stamp: "DD MM 'YY" in italic, anti-aliased 7-segment digits with a faint glow,
+rendered once per photo into an SW x SH coverage buffer (0..255), then blended
+into the photo's bottom right by the strip hook: luma by blend_y (the glow only
+lightens, the core covers), each 2x2 block's chroma toward STAMP_U/V by its
+mean coverage.
 """
 import struct, sys
 
@@ -179,51 +180,99 @@ def lcd_nibbles(segments):
 
 
 # ---- The stamp ----
-DH, DW, PAD = 34, 18, 4                     # digit height, width; the glow's room
-SEGS = [(2, 0, 16, 4), (14, 2, 18, 16), (14, 18, 18, 32), (2, 30, 16, 34),   # a b c d
-        (0, 18, 4, 32), (0, 2, 4, 16), (2, 15, 16, 19), (0, 0, 4, 10)]       # e f g, and '
+# A digicam's date imprint: italic seven-segment digits with pointed ends and
+# hairline gaps, anti-aliased, with a faint warm glow. Geometry in 1/16 px
+# (Q); every step is integer maths the cave repeats exactly.
+Q = 16
+DH, DW, PAD = 46, 26, 4                     # digit height, width (px); the glow's room
+TH = 48                                     # half the stroke (Q, 3 px)
+SL = 48                                     # italic: x shift per unit of height, /256
+R = 40                                      # glow reach beyond the edge (Q, 2.5 px)
+GLOW = 88                                   # coverage at the edge's glow, < 128
+# Per segment a..g, then the apostrophe: centre x, centre y, half length to
+# the tip (Q), vertical. A segment is a hexagon: |across| <= TH and
+# |along| + |across| <= half length.
+SEGS = [(208, 48, 144, 0), (368, 208, 144, 1), (368, 528, 144, 1), (208, 688, 144, 0),
+        (48, 528, 144, 1), (48, 208, 144, 1), (208, 368, 144, 0), (48, 96, 80, 1)]
 DIGITS = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f]
 APOS = 0x80
-RINGS = [(3, 56), (1, 128), (0, 255)]       # (grow by, coverage): glow, glow, core
-ADV_APOS, ADV_DIGIT, ADV_SPACE = 12, 26, 16
-SW = (PAD + ADV_APOS + 3 * (2 * ADV_DIGIT + ADV_SPACE) - ADV_SPACE - 8 + 5 + PAD + 1) // 2 * 2
-SH = DH + 2 * PAD
+ADV_APOS, ADV_DIGIT, ADV_SPACE = 14, 32, 14
+SW, SH = 250, DH + 2 * PAD
 MARGIN = 40                                 # from the photo's right and bottom edges
-STAMP_Y, STAMP_U, STAMP_V = 176, 60, 196    # a hot orange LED (#FF8C1A, a bit brighter)
+STAMP_Y, STAMP_U, STAMP_V = 170, 50, 202    # a deep orange LED
 
 
-def slant(y):
-    """x shift of buffer row y: 0 at the digits' bottom, 5 at their top."""
-    yy = clamp(y - PAD, 0, DH - 1)
-    return ((DH - 1 - yy) * 43) >> 8
+def lut():
+    """Coverage by signed distance d from a segment's edge (Q), at d + 8:
+    the core's anti-aliased edge 255..128 over d in [-8, 8), then the glow
+    GLOW..0 out to R."""
+    t = []
+    for i in range(16 + R + 1):
+        d = i - 8
+        t.append(128 + ((8 - d) * 127 >> 4) if d < 8 else GLOW * (R - d + 8) ** 2 // (R * R))
+    return t
+LUT = lut()
+NLUT = len(LUT)
+
+
+def coverage(seg, gx, x, y):
+    cx, cy, hl, vert = seg
+    ly = (y - PAD) * Q + 8
+    sh = ((DH * Q - ly) * SL) >> 8
+    du = abs((x - gx) * Q + 8 - sh - cx)
+    dv = abs(ly - cy)
+    d = max((du if vert else dv) - TH, ((du + dv - hl) * 181) >> 8)
+    i = d + 8
+    return 255 if i < 0 else LUT[i] if i < NLUT else 0
+
+
+def glyphs(year, mon, day):
+    """(x, segment mask) per glyph of "DD MM 'YY"."""
+    out, x = [], PAD
+    for n in (day, mon, None, year % 100):
+        if n is None:
+            out.append((x, APOS))
+            x += ADV_APOS
+            continue
+        out.append((x, DIGITS[n // 10]))
+        x += ADV_DIGIT
+        out.append((x, DIGITS[n % 10]))
+        x += ADV_DIGIT + ADV_SPACE
+    return out
 
 
 def render(year, mon, day):
+    """The coverage buffer (SW x SH bytes): the max over every lit segment,
+    evaluated at every pixel."""
     buf = bytearray(SW * SH)
+    for gx, mask in glyphs(year, mon, day):
+        for k in range(8):
+            if mask >> k & 1:
+                for y in range(SH):
+                    for x in range(SW):
+                        c = coverage(SEGS[k], gx, x, y)
+                        if c > buf[y * SW + x]:
+                            buf[y * SW + x] = c
+    return bytes(buf)
 
-    def fill(x0, y0, x1, y1, v):
-        for y in range(max(0, y0), min(SH, y1)):
-            s = slant(y)
-            for x in range(max(0, x0 + s), min(SW, x1 + s)):
-                buf[y * SW + x] = max(buf[y * SW + x], v)
 
-    def glyph(x, mask):
-        for seg in range(8):
-            if mask >> seg & 1:
-                x0, y0, x1, y1 = SEGS[seg]
-                for e, v in RINGS:
-                    fill(x + x0 - e, PAD + y0 - e, x + x1 + e, PAD + y1 + e, v)
-
-    x = PAD
-    for n in (day, mon, None, year % 100):
-        if n is None:
-            glyph(x, APOS)
-            x += ADV_APOS
-            continue
-        glyph(x, DIGITS[n // 10])
-        x += ADV_DIGIT
-        glyph(x, DIGITS[n % 10])
-        x += ADV_DIGIT + ADV_SPACE
+def render_boxed(year, mon, day):
+    """render as the cave does it: each segment only over its box, row by row
+    (must equal render)."""
+    buf = bytearray(SW * SH)
+    for gx, mask in glyphs(year, mon, day):
+        for k in range(8):
+            if not mask >> k & 1:
+                continue
+            cx, cy, hl, vert = SEGS[k]
+            along, across = hl + 2 * R + 24, TH + R + 16
+            ex, ey = (across, along) if vert else (along, across)
+            for y in range(max(0, PAD - 1 + ((cy - ey) >> 4)), min(SH, PAD + 2 + ((cy + ey) >> 4))):
+                sh = ((DH * Q - ((y - PAD) * Q + 8)) * SL) >> 8
+                for x in range(max(0, gx - 1 + ((cx - ex + sh) >> 4)), min(SW, gx + 2 + ((cx + ex + sh) >> 4))):
+                    c = coverage(SEGS[k], gx, x, y)
+                    if c > buf[y * SW + x]:
+                        buf[y * SW + x] = c
     return bytes(buf)
 
 
@@ -232,7 +281,15 @@ def stamp_origin(w, h):
 
 
 def blend_y(y, c):
-    return STAMP_Y - (((STAMP_Y - y) * (256 - c)) >> 8) if y < STAMP_Y else y
+    """Glow (c < 128) only lightens, toward STAMP_Y by c/128; the core (c >=
+    128) lights fully, then covers by (c - 128) * 2 / 256, also over brighter
+    ground."""
+    if c < 128:
+        return y + (((STAMP_Y - y) * c) >> 7) if y < STAMP_Y else y
+    if y < STAMP_Y:
+        t = STAMP_Y - y
+        y = STAMP_Y - t + ((11 * t) >> 4)
+    return y + (((STAMP_Y - y) * ((c - 128) * 2)) >> 8)
 
 
 def blend_c(u, t, c):
@@ -240,16 +297,20 @@ def blend_c(u, t, c):
 
 
 def apply_stamp(Y, U, V, cov):
-    """In place on full planes (Y: h x w, U/V: h/2 x w/2 numpy uint8 arrays)."""
+    """In place on full planes (Y: h x w, U/V: h/2 x w/2 numpy uint8 arrays);
+    chroma by the mean coverage of each 2x2 block."""
     h, w = Y.shape
     x0, y0 = stamp_origin(w, h)
     for sy in range(SH):
         for sx in range(SW):
             c = cov[sy * SW + sx]
-            if not c:
-                continue
-            Y[y0 + sy, x0 + sx] = blend_y(int(Y[y0 + sy, x0 + sx]), c)
-            if sy % 2 == 0 and sx % 2 == 0:
+            if c:
+                Y[y0 + sy, x0 + sx] = blend_y(int(Y[y0 + sy, x0 + sx]), c)
+    for sy in range(0, SH, 2):
+        for sx in range(0, SW, 2):
+            o = sy * SW + sx
+            c = (cov[o] + cov[o + 1] + cov[o + SW] + cov[o + SW + 1]) >> 2
+            if c:
                 by, bx = (y0 + sy) // 2, (x0 + sx) // 2
                 U[by, bx] = blend_c(int(U[by, bx]), STAMP_U, c)
                 V[by, bx] = blend_c(int(V[by, bx]), STAMP_V, c)
@@ -257,9 +318,9 @@ def apply_stamp(Y, U, V, cov):
 
 def asm():
     print(f'    .equ    NMODES, {len(MODES)}')
-    for k, v in dict(SW=SW, SH=SH, DH=DH, PAD=PAD, MARGIN=MARGIN, STAMP_Y=STAMP_Y, STAMP_U=STAMP_U,
-                     STAMP_V=STAMP_V, ADV_APOS=ADV_APOS, ADV_DIGIT=ADV_DIGIT, ADV_SPACE=ADV_SPACE,
-                     APOS=APOS).items():
+    for k, v in dict(SW=SW, SH=SH, DH=DH, PAD=PAD, TH=TH, SL=SL, R=R, NLUT=NLUT, MARGIN=MARGIN,
+                     STAMP_Y=STAMP_Y, STAMP_U=STAMP_U, STAMP_V=STAMP_V, ADV_APOS=ADV_APOS,
+                     ADV_DIGIT=ADV_DIGIT, ADV_SPACE=ADV_SPACE, APOS=APOS).items():
         print(f'    .equ    {k}, {v}')
     print(f'    .equ    SS_FIRST, {SS_FIRST:#x}\n    .equ    SS_COUNT, {SS_COUNT}')
     print('    .macro  LCD_TAG_DATA                  @ per mode: HT1621 nibbles for the SS cells')
@@ -271,12 +332,13 @@ def asm():
     print('    .byte   ' + ', '.join(map(str, splash_nibbles())))
     print('    .endm')
     print('    .macro  STAMP_DATA')
-    print('SEGS:                                    @ x0, y0, x1, y1 per segment a..g, then the apostrophe')
-    for s in SEGS:
-        print('    .byte   ' + ', '.join(map(str, s)))
-    print('RINGS:                                   @ grow by, coverage')
-    for e, v in RINGS:
-        print(f'    .byte   {e}, {v}')
+    print('    .align  1')
+    print('SEGS:                                    @ per segment a..g, then the apostrophe: cx, cy, half length, vertical (Q)')
+    for sg in SEGS:
+        print('    .short  ' + ', '.join(map(str, sg)))
+    print('LUT:                                     @ coverage by distance from the edge + 8 (Q)')
+    for k in range(0, NLUT, 16):
+        print('    .byte   ' + ', '.join(map(str, LUT[k:k + 16])))
     print('DIGITS:\n    .byte   ' + ', '.join(f'{d:#04x}' for d in DIGITS))
     print('    .align  2')
     for name, p in PROFILES.items():
@@ -326,13 +388,16 @@ def check():
     t = curves(PROFILES['Y2K'])
     assert 20 <= t[1][0] <= 24 and t[1][255] <= 242   # lifted blacks, soft white
     assert t[0][128] > t[2][128]                      # warm
-    assert all(slant(y) == (DH - 1 - clamp(y - PAD, 0, DH - 1)) // 6 for y in range(SH))
     b = render(2026, 11, 5)
-    assert SW * SH % 4 == 0 and SW % 2 == 0          # snap clears it in words; X0 even
-    last = max(x for x in range(SW) for y in range(SH) if b[y * SW + x])
-    assert last < SW - 1, last                                         # fits
-    assert b[(PAD + 1) * SW + PAD + 4 * ADV_DIGIT + 2 * ADV_SPACE + 6] == 255   # the apostrophe is lit
-
+    assert b == render_boxed(2026, 11, 5) == render_boxed(2026, 11, 5)
+    for date in [(2088, 12, 28), (2000, 1, 1), (2099, 8, 30)]:
+        assert render(*date) == render_boxed(*date), date
+    assert SW * SH % 4 == 0 and SW % 2 == 0 and SH % 2 == 0          # snap clears in words; blocks
+    assert max(LUT) <= 255 and LUT[0] == 255 and LUT[15] >= 128 > LUT[16] == GLOW and LUT[-1] == 0
+    for date in [(2088, 12, 28), (2000, 1, 1)]:
+        c = render(*date)
+        assert not any(c[y * SW + SW - 1] or c[y * SW] for y in range(SH))       # fits, with room
+        assert not any(c[:SW]) and not any(c[-SW:])
 
 if __name__ == '__main__':
     check()

@@ -16,9 +16,9 @@
 @ by FUN_0001808c before the capture); a strip's rows = STRIP_BYTES / (1.5 W),
 @ and V_ROW counts the rows handed over so far. Rows that cross the stamp's
 @ rectangle (bottom right, MARGIN from the edges) get it blended in:
-@ luma toward STAMP_Y (never darker), each 2x2 block's chroma toward STAMP_U/V,
-@ by the coverage of its top-left pixel; tools/digicam.py apply_stamp is the
-@ exact reference.
+@ luma by blend_y (the glow only lightens, the core covers), each 2x2 block's
+@ chroma toward STAMP_U/V by its mean coverage; tools/digicam.py apply_stamp
+@ is the exact reference.
     .syntax unified
     .arm
     .include "digicam.inc"                @ NMODES, SW, SH, ..., STAMP_DATA
@@ -96,7 +96,8 @@ hook:
     mov     r1, r6
     mov     lr, pc
     b       CACHE_INV
-    sub     r6, r8, #MARGIN + SW
+    sub     r6, r8, #MARGIN
+    sub     r6, r6, #SW
     bic     r6, r6, #1                    @ r6 = the stamp's left column, X0
 row:
     ldr     r2, [sp]
@@ -118,22 +119,42 @@ row:
     cmp     r1, #0
     beq     3f
     ldrb    r3, [lr, r0]
+    cmp     r1, #128
+    bhs     6f
+    cmp     r3, #STAMP_Y                  @ glow: only lighten, by c / 128
+    bhs     3f
+    rsb     r9, r3, #STAMP_Y
+    mul     r9, r1, r9
+    add     r3, r3, r9, lsr #7
+    b       7f
+6:  sub     r1, r1, #128                  @ core: lit as the glow's edge,
+    mov     r1, r1, lsl #1
     cmp     r3, #STAMP_Y
-    bhs     3f                            @ brighter than the stamp: as it is
-    rsb     r1, r1, #256
-    rsb     r3, r3, #STAMP_Y
-    mul     r9, r3, r1
-    mov     r9, r9, lsr #8
-    rsb     r3, r9, #STAMP_Y              @ STAMP_Y - (STAMP_Y - Y)(256 - c) / 256
-    strb    r3, [lr, r0]
+    bhs     8f
+    rsb     r9, r3, #STAMP_Y              @  STAMP_Y - t + 11 t / 16,
+    add     r3, r9, r9, lsl #1
+    add     r3, r3, r9, lsl #3
+    rsb     r3, r9, r3, lsr #4
+    add     r3, r3, #STAMP_Y
+8:  rsb     r9, r3, #STAMP_Y              @  then covered by (c - 128) * 2 / 256
+    mul     r9, r1, r9
+    add     r3, r3, r9, asr #8
+7:  strb    r3, [lr, r0]
 3:  add     r0, r0, #1
     cmp     r0, #SW
     blo     2b
     tst     r2, #1
     bne     5f
-    mov     r0, #0                        @ even row: the blocks' chroma
-3:  ldrb    r1, [r12, r0]
-    cmp     r1, #0
+    mov     r0, #0                        @ even row: the blocks' chroma, by
+3:  add     r9, r12, r0                   @  their four pixels' mean coverage
+    ldrb    r1, [r9]
+    ldrb    r3, [r9, #1]
+    add     r1, r1, r3
+    ldrb    r3, [r9, #SW]
+    add     r1, r1, r3
+    ldrb    r3, [r9, #SW + 1]
+    add     r1, r1, r3
+    movs    r1, r1, lsr #2
     beq     4f
     add     r9, r6, r0
     mov     r9, r9, lsr #1                @ the block's column
@@ -277,73 +298,127 @@ pair:
     pop     {r0-r3, r5, pc}
 
 @ The segments of mask r5 (bit 0 = a, ..., bit 7 = the apostrophe) at x = r4
-@ into the stamp r11, each as its RINGS (grown, at a coverage). r0-r10 kept.
+@ into the stamp r11. r0-r10 kept.
 glyph:
     push    {r0-r10, lr}
     ldr     r6, =SEGS - base
 1:  movs    r5, r5, lsr #1
-    bcc     4f
-    ldr     r7, =RINGS - base
-    mov     r8, #3
-2:  ldrb    r9, [r7], #1                  @ grow by
-    ldrb    r12, [r7], #1                 @ coverage
-    ldrb    r0, [r6]
-    add     r0, r0, r4
-    sub     r0, r0, r9
-    ldrb    r1, [r6, #1]
-    add     r1, r1, #PAD
-    sub     r1, r1, r9
-    ldrb    r2, [r6, #2]
-    add     r2, r2, r4
-    add     r2, r2, r9
-    ldrb    r3, [r6, #3]
-    add     r3, r3, #PAD
-    add     r3, r3, r9
-    mov     lr, pc
-    b       fill
-    subs    r8, r8, #1
-    bne     2b
-4:  add     r6, r6, #4
+    movcs   lr, pc
+    bcs     seg
+    add     r6, r6, #8
     cmp     r5, #0
     bne     1b
     pop     {r0-r10, pc}
 
-@ Raise the stamp r11 to coverage r12 over [r0, r2) x [r1, r3), each row
-@ shifted right by its slant ((DH - 1 - clamp(y - PAD)) * 43 >> 8 = / 6),
-@ clipped to the buffer. r0-r10 kept.
-fill:
-    push    {r0-r10, lr}
-    cmp     r1, #0
-    movlt   r1, #0
-    cmp     r3, #SH
-    movgt   r3, #SH
-1:  cmp     r1, r3
+@ Segment r6 (cx, cy, half length, vertical; Q = 1/16 px) of the glyph at
+@ x = r4 into the stamp r11, max with what is there: per pixel of its box,
+@ row by row, the signed distance d from its hexagon (sheared by the italic),
+@ coverage LUT[d + 8] (255 inside, 0 past the glow). digicam.py
+@ render_boxed is the exact reference. All registers kept.
+    .equ    F_Y1, 0
+    .equ    F_GX, 4
+    .equ    F_EX, 8
+    .equ    F_CY, 12
+    .equ    F_HL, 16
+    .equ    F_Y,  20
+seg:
+    push    {r0-r12, lr}
+    sub     sp, sp, #24
+    str     r4, [sp, #F_GX]
+    ldrh    r7, [r6]                      @ r7 = cx
+    ldrh    r8, [r6, #2]                  @ cy
+    ldrh    r9, [r6, #4]                  @ half length
+    ldrh    r10, [r6, #6]                 @ r10 = vertical
+    str     r8, [sp, #F_CY]
+    str     r9, [sp, #F_HL]
+    add     r0, r9, #2 * R + 24           @ the box: along the segment
+    mov     r1, #TH + R + 16              @  and across
+    cmp     r10, #0
+    moveq   r2, r0
+    moveq   r3, r1
+    movne   r2, r1
+    movne   r3, r0
+    str     r2, [sp, #F_EX]               @ x extent
+    add     r1, r8, r3
+    mov     r1, r1, asr #4
+    add     r1, r1, #PAD + 2
+    cmp     r1, #SH
+    movgt   r1, #SH
+    str     r1, [sp, #F_Y1]               @ past the last row
+    sub     r0, r8, r3
+    mov     r0, r0, asr #4
+    adds    r0, r0, #PAD - 1
+    movmi   r0, #0                        @ r0 = the first row
+    ldr     lr, =LUT - base
+1:  ldr     r1, [sp, #F_Y1]
+    cmp     r0, r1
     bge     9f
-    subs    r4, r1, #PAD
-    movlt   r4, #0
-    cmp     r4, #DH - 1
-    movgt   r4, #DH - 1
-    rsb     r4, r4, #DH - 1
-    mov     r5, #43
-    mul     r6, r4, r5
-    mov     r4, r6, lsr #8                @ r4 = the row's slant
-    adds    r5, r0, r4
-    movmi   r5, #0
-    add     r6, r2, r4
-    cmp     r6, #SW
-    movgt   r6, #SW
-    mov     r7, #SW
-    mla     r8, r1, r7, r11               @ r8 = the row
-2:  cmp     r5, r6
-    bge     3f
-    ldrb    r9, [r8, r5]
-    cmp     r9, r12
-    strblo  r12, [r8, r5]
-    add     r5, r5, #1
-    b       2b
-3:  add     r1, r1, #1
+    str     r0, [sp, #F_Y]
+    sub     r1, r0, #PAD
+    mov     r1, r1, lsl #4
+    add     r1, r1, #8                    @ r1 = ly
+    ldr     r2, [sp, #F_CY]
+    subs    r12, r1, r2
+    rsbmi   r12, r12, #0                  @ dv = |ly - cy|
+    ldr     r2, [sp, #F_HL]
+    sub     r8, r12, r2                   @ r8 = dv - hl
+    sub     r9, r12, #TH                  @ r9 = dv - TH
+    rsb     r2, r1, #DH * 16
+    mov     r3, #SL
+    mul     r12, r2, r3
+    mov     r12, r12, asr #8              @ r12 = the row's shear
+    ldr     r2, [sp, #F_EX]
+    ldr     r4, [sp, #F_GX]
+    sub     r5, r7, r2
+    add     r5, r5, r12
+    add     r2, r7, r2
+    add     r2, r2, r12
+    mov     r3, r2, asr #4
+    add     r3, r3, r4
+    add     r3, r3, #2
+    cmp     r3, #SW
+    movgt   r3, #SW                       @ r3 = past the last column
+    mov     r2, r5, asr #4
+    add     r2, r2, r4
+    subs    r2, r2, #1
+    movmi   r2, #0                        @ r2 = x, the first column
+    sub     r5, r2, r4
+    mov     r5, r5, lsl #4
+    add     r5, r5, #8
+    sub     r5, r5, r12                   @ r5 = lx, unsheared
+    mov     r4, #SW
+    mla     r6, r0, r4, r11               @ r6 = the row
+    cmp     r2, r3
+    bge     8f
+2:  subs    r12, r5, r7
+    rsbmi   r12, r12, #0                  @ du = |lx - cx|
+    add     r0, r12, r8
+    mov     r1, #181
+    mul     r4, r0, r1
+    mov     r4, r4, asr #8                @ (du + dv - hl) / sqrt 2
+    cmp     r10, #0
+    subne   r0, r12, #TH                  @ across - TH
+    moveq   r0, r9
+    cmp     r0, r4
+    movlt   r0, r4                        @ d
+    adds    r0, r0, #8
+    movmi   r1, #255
+    bmi     3f
+    cmp     r0, #NLUT
+    bhs     4f
+    ldrb    r1, [lr, r0]
+3:  ldrb    r0, [r6, r2]
+    cmp     r1, r0
+    strbhi  r1, [r6, r2]
+4:  add     r2, r2, #1
+    add     r5, r5, #16
+    cmp     r2, r3
+    blt     2b
+8:  ldr     r0, [sp, #F_Y]
+    add     r0, r0, #1
     b       1b
-9:  pop     {r0-r10, pc}
+9:  add     sp, sp, #24
+    pop     {r0-r12, pc}
     .ltorg
 
     .align  2

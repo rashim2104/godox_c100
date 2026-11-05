@@ -14,8 +14,8 @@ Y2K, a value that is not a mode, and CCD with the clock not set):
      in the camera's YUV 4:2:0 layout, alternating strip A and B, and runs the
      strip hook on each; the result must be the photo with digicam.apply_stamp
      (or untouched, without a stamp), every pixel.
-Reports the hook's instructions per strip (~310 M instructions/s on the
-camera).
+Reports snap's instructions per photo and the hook's per strip (~310 M
+instructions/s on the camera).
 """
 import os, struct, subprocess, sys
 import numpy as np
@@ -138,6 +138,7 @@ def main():
         uc.mem_write(STRIP_BYTES, struct.pack('<I', W * ROWS * 3 // 2))
         uc.mem_write(PHOTO + 0x18, struct.pack('<I', STRIP_A))
         assert run(uc, sym['snap']) == RESUME187
+        snap_steps = steps[0]
         isp = [(n, v) for n, v, _ in calls if n in ('gamma', 'ccm')]
         good = isp == [('gamma', profiles[k][0]), ('ccm', profiles[k][1])]
         stamped = k > 0 and clock_set
@@ -166,7 +167,7 @@ def main():
         ok &= good
         print(f'mode {mode} ({D.MODES[k]}{"" if clock_set else ", clock not set"}): ISP {isp == [("gamma", profiles[k][0]), ("ccm", profiles[k][1])]}, '
               f'stamp {"on" if stamped else "off"}, {changed} luma changed, differing from the reference: '
-              f'{dy} luma, {duv} chroma {"" if good else " FAILED"}')
+              f'{dy} luma, {duv} chroma, snap {snap_steps / 1e3:.0f} k instructions {"" if good else " FAILED"}')
     print(f'hook: up to {most / 1e3:.0f} k instructions per strip (~{most / 310e3:.2f} ms)')
     print('digicam test', 'PASSED' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
