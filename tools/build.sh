@@ -120,6 +120,21 @@ if [ "$EXIF" = "1" ]; then
     MJUMP2=$(asm bl_jump 0x8ca1c 0x8ca20 --defsym=AT=0x8ca1c --defsym=HOOK=$MHOOK)
     EXIF_PATCHES="$ECAVE $EJUMP $MTIME $MMETA $MJUMP1 $MJUMP2"
 fi
+# The modes on video (VIDEOLOOK=1, default; VIDEOLOOK=0 leaves it out): at
+# record start (the bl to video_encode_record_start at 0x35e30) the mode's
+# ISP profile (nor: stock) and in CCD/Y2K the date stamp, burned into every
+# frame on its way to the H.264 encoder (FUN_00018d14). In the dead range
+# 0xbb774-0xbbaa0 (tools/patches/video_look.s); it calls the digicam cave's
+# isp_profile and stamp_draw and shares its stamp buffer.
+VIDEOLOOK=${VIDEOLOOK:-1}
+VIDEO_PATCHES=""
+if [ "$VIDEOLOOK" = "1" ]; then
+    VCAVE=$(asm video_look 0xbb774 0xbbaa0 --defsym=ISP_PROFILE_ADDR=$(nmsym digicam_cave isp_profile) \
+        --defsym=STAMP_DRAW_ADDR=$(nmsym digicam_cave stamp_draw) --defsym=DVARS_ADDR=$(nmsym digicam_cave VARS))
+    VJUMP=$(asm b_jump 0x18d14 0x18d18 --defsym=AT=0x18d14 --defsym=HOOK=$(nmsym video_look vhook))
+    RJUMP=$(asm bl_jump 0x35e30 0x35e34 --defsym=AT=0x35e30 --defsym=HOOK=$(nmsym video_look rec_start))
+    VIDEO_PATCHES="$VCAVE $VJUMP $RJUMP"
+fi
 # Every mode takes the factory's sizes. Until v028 the normal mode had aspect
 # slots of its own (6, 7, 8, 10 and 13), and a camera can still have one
 # saved: their entries in both size tables (photo @0xf3d0, video @0xf0a0) stay
@@ -127,5 +142,5 @@ fi
 NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES $VIDEO_PATCHES \
     $NORMAL_PATCHES $SPK_PATCHES
