@@ -2,10 +2,12 @@
 
 _Last updated 2026-11-05_
 
-**Now (`v031`):** three modes on the center button, `nor` → `CCD` → `Y2K`:
-the factory camera, and two early-2000s digicam looks done in the camera's
-own ISP (full resolution, hardware JPEG), with a clean orange `05 11 '26`
-date stamp (DD MM 'YY) in the corner of every digicam photo. Synthesized digicam
+**Now (`v032`):** six modes on the center button, `nor` → `CCD` → `Y2K` →
+`bW` → `nGt` → `SUn`: the factory camera, and five early-2000s digicam looks
+done in the camera's own ISP (full resolution, hardware JPEG; tone, colour,
+sharpening, grain and vignette per mode), with a clean orange `05 11 '26`
+date stamp (DD MM 'YY) in the corner of every digicam photo and video. Videos
+take the mode's look too. Photo size and JPEG quality are build options. Synthesized digicam
 sounds (shutter "ka-chak", power-on chime, mode click). EXIF in every photo,
 UTC dates in videos, and [`rASHIM` on the display at boot](#boot-splash) in
 place of the GODOX logo.
@@ -24,13 +26,14 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
 | [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | emulator (`v030`) |
-
-Open: the ISP profile stays on after a digicam photo, so a video recorded
-next is graded too, until the next `nor` photo.
+| [More modes](#more-modes-and-stamp-options) BW, NGT, SUN; stamp order, time and colour as build options | emulator (`v032`) |
+| [ISP look](#the-isp-look-sharpening-grain-vignette): edge/sharpen gain, noise reduction, lens shading per mode | emulator, call level only (`v032`) |
+| [Digicam modes on video](#digicam-modes-on-video): the mode's ISP profile and the date stamp in every frame | emulator (`v032`) |
+| [Photo sizes and JPEG quality](#photo-sizes-and-jpeg-quality): `SIZE*`, `JPEG_Q` | emulator (`v032`), factory by default |
 
 Contents: [The device](#the-device) · [Image layout](#firmware-image-layout-gp_cardvr_upgradebin-v116) ·
 [Tooling](#tooling) · [Backups](#backups-in-build_backups) · [Code caves and hooks](#code-caves-and-hooks) ·
-[Photos](#photos) · [Digicam modes](#digicam-modes) · [EXIF](#exif) · [Video](#video) · [Sounds](#sounds) ·
+[Photos](#photos) · [Digicam modes](#digicam-modes) · [ISP look](#the-isp-look-sharpening-grain-vignette) · [EXIF](#exif) · [Video](#video) · [Sounds](#sounds) ·
 [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay) · [Ideas](#ideas-not-yet-done)
 
 ## The device
@@ -76,6 +79,10 @@ In `tools/`:
   | `SILENT` | 0 | 1 = no sounds and the speaker amp never switched on; 0 = the [digicam sounds](#sounds) |
   | `SHUTTER_WAV`, `POWERON_WAV`, `CLICK_WAV` | `build/sounds/*.wav` | other sounds (11025 Hz mono 16-bit, at most the slot) |
   | `EXIF` | 1 | [EXIF](#exif) in photos, metadata in videos; 0 = left out |
+  | `VIDEOLOOK` | 1 | [the mode's look and stamp on video](#digicam-modes-on-video); 0 = factory video |
+  | `SIZE169`, `SIZE32`, `SIZE43`, `SIZE11` | factory | [photo size](#photo-sizes-and-jpeg-quality) per aspect, `WxH` |
+  | `JPEG_Q` | factory | photo JPEG quality, 1–98 |
+  | `STAMP_ORDER`, `STAMP_TIME`, `STAMP_COLOR` | `dmy`, 0, `orange` | [stamp options](#more-modes-and-stamp-options) |
 
   The UI/focus beep (`BEEP.wav`) is silenced in every build.
 - `digicam.py` — the [digicam modes](#digicam-modes): the profiles (tone
@@ -84,6 +91,7 @@ In `tools/`:
   glyphs and blend. `digicam.py asm` writes `digicam.inc` for the caves;
   `digicam.py preview IMG.jpg OUT` renders the looks off-camera, `digicam.py
   stamp OUT.png` the stamp.
+- `photo.py` — the size stubs and quality patches for `SIZE*` / `JPEG_Q`.
 - `sounds.py` — synthesizes the [sounds](#sounds) into `build/sounds/`.
 - `emu_digicam.py` — runs the built digicam cave in Unicorn: per mode the ISP
   must get the mode's tables, and the strip hook must turn a real photo (in
@@ -96,6 +104,10 @@ In `tools/`:
   button in the emulator against the factory firmware (see
   [The transparent display](#the-transparent-display-a-segment-panel-ht1621)).
 - `emu_exif.py` — EXIF in the emulator.
+- `emu_video.py` — the video hooks: record start must set the mode's profile
+  and look, and the frame hook must burn exactly `digicam.apply_stamp` into a
+  frame. `emu_size.py` — the size stubs, tables and Q patches.
+  `emu_stamp_options.sh` — builds and checks every stamp option combination.
 - `patch_code.py` — apply byte patches addressed by RAM address; refuses to
   touch the bootloader or the SD updater, and verifies the original bytes first.
 - `gp_res.py` — list/extract the resource table. `patch_res.py` — replace a
@@ -190,6 +202,9 @@ which shifts every address after them).
   removed. Emulator only so far.
 - `v031_stamp.bin` — the clean stamp: italic, anti-aliased seven-segment
   digits, 1.35× larger, solid on bright ground. Emulator only so far.
+- `v032_all.bin` — BW, NGT, SUN modes; per-mode sharpening, grain and
+  vignette in the ISP; the mode's look and the stamp on video. Factory photo
+  size and quality. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -205,6 +220,8 @@ at `0x15448` and returns to `0x1544c`).
 | tail call `b 0x20fd0` at `0x21218` | SS readout on the see-through display, every refresh tick | `lcd_hook` | mode on the display |
 | `bl 0x42c` at `0x1ddf8` (post `0x7041`) | center button, once per press | `center_hook` | step the mode |
 | `0x22b38`, `0x350f0`, `0x2ed50` | — | (NOPs, `SILENT=1` only) | speaker amp off |
+| `bl` at `0x35e30` (video record start) | once per recording | `rec_start` | the mode's ISP profile, draw the stamp |
+| `FUN_00018d14` | every video frame, before H.264 | `vhook` | the stamp on video |
 | tail call `b 0x4a64c` at `0x4ae38` | display init, once at boot | `splash` | [`rASHIM` instead of the logo](#boot-splash) |
 | `0x18328`, `0x88180`, … | JPEG header write, MOV atoms | `exif_*`, `mov_*` | [EXIF](#exif) |
 
@@ -226,6 +243,12 @@ branches, but `0x80c` is a timer callback passed at `0xcb8`, and `0xbf4` /
 `0xc18` are callback pointers at `0x24b4`) and `0xc589e–0xc5d30` (Thumb
 libm code with a Thumb branch into it from `0xc609c`).
 
+**Profile data** (`profile_data.s`) — `0xbbc00–0xbc400`: `PROFILES`, the
+gamma/matrix tables, `LOOKS` (4 B per mode), `LSC_ZERO`, `NR_LOW`.
+**Video look** (`video_look.s`) — `0xbb774–0xbbaa0`: `rec_start`, `vhook`.
+**Size cave** (`size_cave.s`) — `0xbb340–0xbb3b0`: the `SIZE*` stubs.
+Still free: `0xba74c–0xba91c`, `0xbbb08–0xbbc00`.
+
 Only `hook` has a fixed address. `build.sh` reads every other address from
 the object files (`llvm-nm`) and patches the jumps with them.
 
@@ -241,6 +264,17 @@ into 0–4.
 Photos are the factory's: the four aspect settings at 1920×1080, 1616×1080,
 1440×1080 and 1024×1024, hardware JPEG (`FUN_0000f004` builds each capture
 size; the photo size switch is the jump table at `0xf3d0`).
+
+### Photo sizes and JPEG quality
+
+`SIZE169`/`SIZE32`/`SIZE43`/`SIZE11=WxH` give an aspect setting its own size:
+a stub on the `0xf3d0` jump table sets crop and output size and rejoins the
+factory path at `0xf188`. The crop is the largest of the size's shape inside
+the stock crop, so the bracket still frames it; downscale only, width a
+multiple of 16, at least 320×240. `JPEG_Q=1..98` replaces the three
+`mov r3, #Q` in `FUN_00011724` (stock: setting 0 → 98, 2 → 80, else 90; our
+cameras use 90). A "2005 compact" build: `SIZE43=1280x960 SIZE169=1280x720
+JPEG_Q=80`.
 
 ### Strip buffer format
 
@@ -284,6 +318,41 @@ the hardware JPEG like any photo.
 - **Y2K** — warm and faded: lifted blacks, rolled-off highlights
   (`Y2K_POINTS`), a warm cast with a split tone (`y2k_cast`), saturation
   ×0.85–0.9.
+
+- **BW** — monochrome, contrasty S-curve, saturation 0.
+- **NGT** — a cold night: crushed blacks, darker mids, a teal-blue cast.
+- **SUN** — a disposable in the sun: lifted blacks, bright mids, golden cast.
+
+### More modes and stamp options
+
+The display shows `bW` (W spans two cells), `nGt`, `SUn`. Stamp build
+options: `STAMP_ORDER` `dmy` (default) / `ymd` / `mdy`; `STAMP_TIME=1` adds
+`14:07` after a gap; `STAMP_COLOR` `orange` / `red` / `yellow` / `green`.
+`emu_digicam.py` and `emu_video.py` must run with the same values as the build.
+
+### The ISP look: sharpening, grain, vignette
+
+`isp_profile` also programs the CDSP (MMIO `0xd0800000`) per mode from
+`LOOKS` (ampga, sharpen gain, flags):
+
+| Mode | Edge ampga | Sharpen | HbNr off | NR low (grain) | LSC off (vignette) |
+|---|---|---|---|---|---|
+| nor | 0 | 0x20 | | | |
+| CCD | 2 | 0x40 | ✓ | ✓ | ✓ |
+| Y2K | 1 | 0x30 | | | ✓ |
+| BW | 2 | 0x40 | ✓ | ✓ | ✓ |
+| NGT | 1 | 0x20 | | ✓ | ✓ |
+| SUN | 0 | 0x20 | | | ✓ |
+
+Setters: edge `FUN_0009852c(ampga)`, sharpen `FUN_000914e8(gain)` plus the
+tuner's per-level ints at ctx+`0x14a0..0x14ac` (`g, g-3, g-7, g-10`), HbNr
+`FUN_000915b0(on)`, NR `FUN_00090af8` with the NR table pointer at
+ctx+`0x17a8` (stock `0xd62e4`, low = `NR_LOW` with thresholds 1), lens
+shading `FUN_00098810()` regenerated from the strengths at ctx+`0x17b0`
+(stock `0xd6a9c` = 25,25,25; `LSC_ZERO` = no correction, the lens's own
+falloff). `nor` restores stock (NR with level-0 values `1,3,5,6`).
+Risks, untested on hardware: the gain tuner `FUN_00091948` rewrites some of
+these when the AE gain level changes; `nor`'s NR restore uses level 0.
 
 ### The ISP tables
 
@@ -454,8 +523,16 @@ address. It is full: more tags need another cave.
 
 Stock video: H.264 High@4.1, 1920×1080, ~28 fps, ~9 Mbit/s, 16 kHz mono PCM,
 in a QuickTime `.mov` named `IMG_xxxx.mov` (the `MOVA%04d.avi` strings in the
-firmware are leftovers). The firmware leaves video alone apart from its
-[metadata](#exif). Small, dithered video (`v011`–`v027`) is in git history.
+firmware are leftovers). Small, dithered video (`v011`–`v027`) is in git history.
+
+### Digicam modes on video
+
+`rec_start` (the `bl` at `0x35e30`) runs `isp_profile` for the current mode
+(nor: stock, so a graded photo no longer leaks into video) and draws the stamp
+once into the shared buffer; `vhook` (first instruction of `FUN_00018d14`)
+blends it into each frame's bottom right using the frame's W (+`0xdc`), H
+(+`0xe0`) and rows (+`0xd0`), ~224k instructions per frame. The time on the
+stamp is the recording's start. `VIDEOLOOK=0` leaves video factory.
 
 ## Sounds
 
@@ -749,10 +826,6 @@ panel.
 
 ## Ideas not yet done
 
-- Reset the ISP profile to stock when recording starts, so video is never
-  graded.
-- More of the digicam look in the ISP: sharpening (CCD), noise/grain, a
-  vignette.
 - Run a segment test on the transparent display to confirm the
   [segment map](#the-transparent-display-a-segment-panel-ht1621), then play
   with it (e.g. a custom startup animation from the logo and bracket segments).
