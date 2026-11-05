@@ -22,7 +22,7 @@ FIRST, LAST = 0x20, 0x7f    # the font covers these characters
 # Segment -> (HT1621 address, COM) for each cell, left to right: ISO 1-2, F 1-2,
 # SS 1-3, found by running the firmware's digit routines (FUN_00049ea8,
 # FUN_0004a4ec, FUN_0004a074, FUN_0004a374, FUN_0004a1f0) for 0..9 in the
-# emulator, as palettes.SS_CELLS (the last three) were.
+# emulator, as digicam.SS_CELLS (the last three) were.
 CELLS = [
     {'a': (0x01, 0), 'b': (0x02, 1), 'c': (0x02, 2), 'd': (0x01, 2), 'e': (0x00, 2), 'f': (0x00, 1), 'g': (0x01, 1)},
     {'a': (0x04, 0), 'b': (0x05, 1), 'c': (0x05, 2), 'd': (0x04, 2), 'e': (0x03, 2), 'f': (0x03, 1), 'g': (0x04, 1)},

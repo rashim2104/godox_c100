@@ -79,62 +79,33 @@ print(f'{start:#x}:{old.hex()}:{new.hex()}')
 }
 
 # --- code patches ---
-# Presets (match palettes x film colours) with their contrast and brightness,
-# rnd and the normal mode (no effect) on or off, tags and display codes from
-# tools/palettes.py (PRESETS_JSON), included by the caves. The preset data is too big for the
-# photo cave: it goes in the unused end of the fx4 cave's dead range,
-# 0xbbc00-0xbc400 (see tools/patches/preset_data.s).
-python3 -I tools/palettes.py asm > build/obj/palettes.inc
-python3 -I tools/digicam.py asm > build/obj/digicam.inc   # the digicam modes' ISP profiles
+# The modes, nor, CCD and Y2K (tools/digicam.py: digicam.inc), in the dead
+# FUN_000bab6c, 0xbab6c-0xbb340 (tools/patches/digicam_cave.s): per photo
+# (the capture handler, 0x187c4) the mode's ISP profile and the date stamp,
+# per strip (the scaler's callback, 0x15448) the stamp blended in. The center
+# button cycles the modes and the display's shutter-speed cells show the
+# current one (tools/patches/lcd_cave.s, 0xbc400-0xbc660: the refresh's tail
+# call at 0x21218 and the center key's post at 0x1ddf8).
+python3 -I tools/digicam.py asm > build/obj/digicam.inc
 nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
     $LLVM/llvm-nm "build/obj/$1.o" | awk -v s="$2" '$3 == s { print "0x" $1 }'
 }
-PDATA=$(asm preset_data 0xbbc00 0xbc400)
-CAVE=$(asm photo_cave 0xbab6c 0xbb340 \
-    --defsym=MATCH_ADDR=$(nmsym preset_data MATCH_PALETTES) --defsym=PMATCH_ADDR=$(nmsym preset_data PRESET_MATCH) \
-    --defsym=DPTRS_ADDR=$(nmsym preset_data DISPLAY_PTRS) --defsym=TAGS_ADDR=$(nmsym preset_data TAGS) \
-    --defsym=FX_ADDR=$(nmsym preset_data PRESET_FX) \
-    --defsym=GBTONE_ADDR=$(nmsym preset_data gb_tone_fill) --defsym=UDIV_ADDR=$(nmsym preset_data udiv) \
-    --defsym=ISPPROF_ADDR=$(nmsym preset_data isp_profile))  # dead FUN_000bab6c
-sym() {  # address of a label in the assembled photo cave
-    nmsym photo_cave "$1"
-}
-HOOK_JUMP=$(asm hook_jump 0x15448 0x1544c --defsym=HOOK=$(sym hook))
-CYC_JUMP=$(asm cyc_jump 0x187c4 0x187c8 --defsym=STUB=$(sym idx_stub))  # per-photo palette + table
-# fx_strip's 4x4 blocks (FX_PIX4, the GBC preset) at a fixed 0xbb774, in the
-# dead FUN_000bb774 (tools/patches/fx4.s).
-FX4CAVE=$(asm fx4 0xbb774 0xbbaa0 --defsym=PVARS_ADDR=$(sym VARS))
-# Preset mode on the see-through display and the center button (LCDTAG=1,
-# default; LCDTAG=0 = stock blank display, center button does nothing, always
-# the first preset): in photo and video mode the center button cycles the
-# presets and rnd (a random preset per photo/recording), and the display's
-# shutter-speed readout cells show the current one. Redirects the refresh's
-# tail call to 0x20fd0 (SS readout) at 0x21218 and the center key handler's
-# message post at 0x1ddf8 into a third cave in the same dead code,
-# 0xbc400-0xbc744. See tools/patches/lcd_cave.s. It also switches to the
-# factory's sizes in the normal mode (aspect slots 6, 7, 8, 10 and 13,
-# NORMAL_PATCHES below), redirecting the arrow keys' aspect change at 0x213e0
-# and the display's aspect bracket at 0x4a818 there too.
-LCDTAG=${LCDTAG:-1}
+CAVE=$(asm digicam_cave 0xbab6c 0xbb340)
+HOOK_JUMP=$(asm hook_jump 0x15448 0x1544c --defsym=HOOK=$(nmsym digicam_cave hook))
+CYC_JUMP=$(asm cyc_jump 0x187c4 0x187c8 --defsym=STUB=$(nmsym digicam_cave snap))
 STORY=${STORY:-1}
-LCD_PATCHES=""
-if [ "$LCDTAG" = "1" ]; then
-    LCAVE=$(asm lcd_cave 0xbc400 0xbc660)
-    LJUMP=$(asm lcd_jump 0x21218 0x2121c --defsym=HOOK=$(nmsym lcd_cave lcd_hook))
-    KJUMP=$(asm key_jump 0x1ddf8 0x1ddfc --defsym=HOOK=$(nmsym lcd_cave center_hook))
-    [ "$STORY" = "1" ] && KJUMP=""      # the story's center hook goes first, then center_hook
-    AJUMP=$(asm aspect_jump 0x213e0 0x213e4 --defsym=HOOK=$(nmsym lcd_cave aspect_hook))
-    BJUMP=$(asm bracket_jump 0x4a818 0x4a81c --defsym=HOOK=$(nmsym lcd_cave bracket_hook))
-    LCD_PATCHES="$LCAVE $LJUMP $KJUMP $AJUMP $BJUMP"
-fi
+LCAVE=$(asm lcd_cave 0xbc400 0xbc660)
+LJUMP=$(asm lcd_jump 0x21218 0x2121c --defsym=HOOK=$(nmsym lcd_cave lcd_hook))
+KJUMP=$(asm key_jump 0x1ddf8 0x1ddfc --defsym=HOOK=$(nmsym lcd_cave center_hook))
+[ "$STORY" = "1" ] && KJUMP=""          # the story's center hook goes first, then center_hook
 # A story on the display at startup (STORY=1, default; STORY=0 leaves it out):
 # STORY.TXT from the SD card root (none there: no story), one line at a time
 # on the ISO/F/SS cells, the right arrow and the shutter to the next line, the
 # left arrow back, until past the last. Font from story/font.json (STORY_FONT), see tools/story.py
 # and tools/patches/story_cave.s. Caves in the rest of the dead code: the
 # drawing at 0xba74c-0xba91c (dead FUN_000ba74c), the file at 0xbb340-0xbb3f8
-# (the end of the photo cave's dead function), the hooks at 0xbbb08-0xbbc00
-# (the end of the fx4 cave's) and the font at 0xbc660-0xbc744 (the end of
+# (the end of the digicam cave's dead function), the hooks at 0xbbb08-0xbbc00
+# (the end of a dead range, 0xbb774-0xbbc00) and the font at 0xbc660-0xbc744 (the end of
 # the display cave's). Hooks: the card mount (bl at 0x3e03c), the display
 # refresh (b at its start, 0x21318: only the line, nothing else, during the
 # story), the arrows' and center's posts (bl at 0x1dd44, 0x1deac, 0x1ddf8)
@@ -147,8 +118,7 @@ if [ "$STORY" = "1" ]; then
         --defsym=WIDE_ADDR=$(nmsym story_data WIDE) --defsym=PUT_ADDR=$(nmsym story_data put))
     SVARS=$(nmsym story_cave VARS)
     SLOAD=$(asm story_load 0xbb340 0xbb3f8 --defsym=VARS_ADDR=$SVARS --defsym=PATH_ADDR=$(nmsym story_cave PATH))
-    CENTER_NEXT=0x42c                   # the stock post, or with LCDTAG=1 center_hook
-    [ "$LCDTAG" = "1" ] && CENTER_NEXT=$(nmsym lcd_cave center_hook)
+    CENTER_NEXT=$(nmsym lcd_cave center_hook)
     SHOOKS=$(asm story_hooks 0xbbb08 0xbbc00 --defsym=VARS_ADDR=$SVARS --defsym=CENTER_NEXT=$CENTER_NEXT \
         --defsym=PREV_ADDR=$(nmsym story_cave story_prev) --defsym=DRAW_ADDR=$(nmsym story_cave draw))
     hook() {  # hook b|bl AT LABEL: a branch at AT to a label of story_hooks / story_load
@@ -172,7 +142,7 @@ if [ "$EXIF" = "1" ]; then
     # Videos: UTC dates (the stock firmware takes off 8 h) on the movie and its tracks.
     MOV_OFFSET=$(python3 -I -c "import sys; s=sys.argv[1]; h,m=s[1:].split(':'); print((-1 if s[0]=='-' else 1)*(int(h)*3600+int(m)*60))" "${EXIF_OFFSET:-+05:30}")
     MTIME=$(asm mov_time 0x88180 0x88194 --defsym=MOV_OFFSET=$MOV_OFFSET)
-    # Videos: make, model and artist (udta), in the end of the fx4 cave's dead range.
+    # Videos: make, model and artist (udta), in the dead range 0xbb774-0xbbc00.
     python3 -I tools/exif.py udta > build/obj/udta.inc
     MMETA=$(asm mov_meta 0xbbaa0 0xbbb08)
     MHOOK=$(nmsym mov_meta mov_meta)
@@ -180,34 +150,12 @@ if [ "$EXIF" = "1" ]; then
     MJUMP2=$(asm bl_jump 0x8ca1c 0x8ca20 --defsym=AT=0x8ca1c --defsym=HOOK=$MHOOK)
     EXIF_PATCHES="$ECAVE $EJUMP $MTIME $MMETA $MJUMP1 $MJUMP2"
 fi
-# The digicam modes' date stamp: the firmware's own photo stamp (FUN_00019568,
-# off in the stock settings), which isp_profile (photo_cave.s) turns on per
-# photo in a digicam mode. As '26 11 05 (format at 0xd0fc8, its length check
-# at 0x1c164, year_fix for the two-digit year at the snprintf's bl, 0x1c160),
-# in orange (the literal at 0x1c650: Y << 16 | U << 8 | V).
-STAMP_PATCHES="0xd0fc8:$(python3 -I -c "print(b'%04u/%02u/%02u %02u:%02u:%02u\0'.hex())"):$(python3 -I -c "print(b\"'%02u %02u %02u\".ljust(30, b'\0').hex())")
-    0x1c164:130050e3:090050e3 0x1c650:8080ff00:c334a100
-    $(asm bl_jump 0x1c160 0x1c164 --defsym=AT=0x1c160 --defsym=HOOK=$(nmsym preset_data year_fix))"
-# Resolution jump table @0xf3d0 (ldrls pc,[pc,idx,lsl#2] @0xf3c8): entries hold
-# absolute handler addresses, so point each photo aspect ratio straight at its
-# cave stub. 0/1=16:9 1920, 2=3:2 1616, 3=4:3 1440, 4=1:1 1024; b/c = hi-res.
-jt() {  # jt ENTRY OLDHEX LABEL -> ENTRY:OLDHEX:<label address, little-endian>
-    printf '%s:%s:%s\n' "$1" "$2" "$(python3 -I -c "import sys; print(int(sys.argv[1], 0).to_bytes(4, 'little').hex())" "$(sym "$3")")"
-}
-# The normal mode uses the factory's sizes: its aspects are slots 6, 7,
-# 8, 10 and 13 (lcd_cave.s NIDX), whose entries in both tables (photo @0xf3d0,
-# video @0xf0a0) become the factory handlers of aspects 0-4, copied from the
-# original (nothing else uses those slots).
+# Every mode takes the factory's sizes. Until v028 the normal mode had aspect
+# slots of its own (6, 7, 8, 10 and 13), and a camera can still have one
+# saved: their entries in both size tables (photo @0xf3d0, video @0xf0a0) stay
+# the factory handlers of aspects 0-4 (nothing else uses those slots).
 NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" "$FX4CAVE" $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES $STAMP_PATCHES \
-    "$(jt 0xf3d0 9cf70000 stub169)" \
-    "$(jt 0xf3d4 9cf70000 stub169)" \
-    "$(jt 0xf3d8 b0f70000 stub32)" \
-    "$(jt 0xf3dc c4f70000 photo43)" \
-    "$(jt 0xf3e0 d4f60000 stub11)" \
-    $NORMAL_PATCHES \
-    "$(jt 0xf3fc 60f70000 photo43)" \
-    "$(jt 0xf400 74f70000 photo43)" \
-    $SPK_PATCHES
+    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" $KJUMP $STORY_PATCHES $EXIF_PATCHES \
+    $NORMAL_PATCHES $SPK_PATCHES

@@ -15,7 +15,7 @@ file, a second mount (no reload), and the readout state.
 
 Usage: uv run --with unicorn tools/emu_story.py [FIRMWARE.BIN]
 (FIRMWARE.BIN from SILENT=1 sh tools/build.sh, the default; it is compared with
-v024, so the build must have the default LCDTAG=1.)
+v024, its SS cells aside, which show the mode.)
 """
 import os, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
@@ -28,6 +28,7 @@ STOCK = 'build_backups/v024_editor_template.bin'   # = SILENT=1 STORY=0
 sys.argv = sys.argv[:1]
 import emu_seg as E
 import story
+import digicam
 
 OPEN, READ, CLOSE, MALLOC, FREE, VERSION_TXT = 0x9e608, 0x9e67c, 0x9dc7c, 0x53750, 0x53754, 0x37f34
 MSG_POST, UI_STATE, CFG = 0x42c, 0x121706, 0x132160
@@ -138,8 +139,16 @@ if __name__ == '__main__':
     data = text.encode()
 
     stock_uc, stock_lcd, stock_card = boot(STOCK, None)
+    V024_TAG = [14, 6, 12, 14, 8, 14, 6]
+
     def stock_view(state):
-        return refresh(stock_uc, stock_lcd, state)
+        """v024's display, with the SS cells showing this build's first mode
+        (nor) instead of v024's first preset."""
+        ram = refresh(stock_uc, stock_lcd, state)
+        cells = slice(digicam.SS_FIRST, digicam.SS_FIRST + digicam.SS_COUNT)
+        if list(ram[cells]) == V024_TAG:
+            ram = ram[:cells.start] + digicam.lcd_nibbles(digicam.lcd_segments(digicam.MODES[0])) + ram[cells.stop:]
+        return ram
 
     def shows(uc, lcd, state, line, label):
         """The refresh draws `line` and nothing else on the whole panel."""
