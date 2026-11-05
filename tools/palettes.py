@@ -361,9 +361,12 @@ def tag_colours(cols):
 # mirrored cells: full left side + bottom + lower right, then lower left +
 # bottom + full right side.
 SEG7 = {'E': 'adefg', 'F': 'aefg', 'P': 'abefg', '6': 'acdefg', '8': 'abcdefg', 'G': 'acdef', 'C': 'adef',
-        'W<': 'cdef', 'W>': 'bcde', 'r': 'eg', 'n': 'ceg', 'd': 'bcdeg', 'o': 'cdeg'}
+        'W<': 'cdef', 'W>': 'bcde', 'r': 'eg', 'n': 'ceg', 'd': 'bcdeg', 'o': 'cdeg',
+        'Y': 'bcdfg', '2': 'abdeg', 'K': 'acefg'}
 LCD = {'EP6': ['E', 'P', '6'], '6FP': ['6', 'F', 'P'], 'BW': ['8', 'W<', 'W>'],
-       'GBC': ['G', '8', 'C'], RND: ['r', 'n', 'd'], 'nor': ['n', 'o', 'r']}
+       'GBC': ['G', '8', 'C'], RND: ['r', 'n', 'd'], 'nor': ['n', 'o', 'r'],
+       'CCD': ['C', 'C', 'd'], 'Y2K': ['Y', '2', 'K']}
+DIGI = ['CCD', 'Y2K']   # the digicam modes, after nor (tools/digicam.py)
 # Segment -> (HT1621 address, COM) for each SS cell, left to right, found by
 # running the firmware's SS digit routines (FUN_0004a374, FUN_0004a1f0,
 # FUN_0004a074) for 0..9 in tools/emu_seg.py. Each cell is wired differently.
@@ -417,7 +420,7 @@ def lcd_nibbles(segments):
 # And (optional, default false) 'normal': the center button also offers the
 # normal mode after rnd (from Donald Sayers' fork): no effect at all, photos and
 # video as the factory makes them, at the factory's sizes. Its code is NORMAL.
-MAX_PRESETS = 8
+MAX_PRESETS = 4
 SEGMENTS = 'abcdefg'
 CONTRAST_RANGE = BRIGHTNESS_RANGE = (-50, 50)
 NORMAL = 'nor'
@@ -552,7 +555,7 @@ PD['DPTRS'] = (PD['DISPLAY'] + MAX_PRESETS * NCOL_BYTES + 3) // 4 * 4
 PD['FX'] = PD['DPTRS'] + 4 * MAX_PRESETS
 PD['END'] = PD['FX'] + FX_BYTES * MAX_PRESETS
 assert PD['END'] <= 0xbc400
-LCD_BYTES = (MAX_PRESETS + 2) * SS_COUNT       # LCD_TAGS in lcd_cave.s: MAX_PRESETS presets, rnd, nor
+LCD_BYTES = (MAX_PRESETS + 2 + len(DIGI)) * SS_COUNT  # LCD_TAGS in lcd_cave.s: MAX_PRESETS presets, rnd, nor, digicam
 
 
 def fx_bytes(p):
@@ -579,6 +582,7 @@ def main():
         print(f'    .equ    RND_MODE, {int(cfg["rnd"])}                  @ 1 = the center button offers rnd')
         print(f'    .equ    NORMAL_MODE, {int(cfg.get("normal", False))}               @ 1 = and then the normal mode')
         print(f'    .equ    MAX_PRESETS, {MAX_PRESETS}')
+        print(f'    .equ    NDIGI, {len(DIGI)}                    @ digicam modes, after nor')
         for k, v in PD.items():
             print(f'    .equ    PD_{k}, {v:#x}')
         print('    .macro  MATCH_DATA                    @ per preset: count, then count x (Y,U,V)')
@@ -636,7 +640,7 @@ def main():
         for p in pre:
             line(p['tag'], p['lcd'])
         print(f'    .space  {SS_COUNT * (MAX_PRESETS - n)}' if n < MAX_PRESETS else '')
-        for code in (RND, NORMAL):
+        for code in (RND, NORMAL, *DIGI):
             line(code, lcd_segments(code))
         print('    .endm')
         return

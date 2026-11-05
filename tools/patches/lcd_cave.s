@@ -45,12 +45,10 @@
 @ camera restart, about a second). aspect_hook (aspect_jump.s) makes the
 @ arrow keys step the remembered aspect in the normal mode, bracket_hook
 @ (bracket_jump.s) maps a slot back to its aspect for the display's bracket.
+@ After nor come the digicam modes (NDIGI, tools/digicam.py): the factory's
+@ sizes too (is_normal), and an ISP profile and the date stamp (lut_fill).
 @ The nibbles come from tools/palettes.py (LCD_TAG_DATA, one entry per mode:
-@ the presets, padded to MAX_PRESETS, then rnd and nor). The npal_* labels
-@ mark the instructions whose immediate is NPAL, npal1_* NPAL + 1, max_* NPAL
-@ + NORMAL_MODE (the last mode), last_center NPAL - 1 + RND_MODE and
-@ after_last NPAL + 1 or 0 (what follows the last preset, or rnd): the site's
-@ editor rewrites them.
+@ the presets, padded to MAX_PRESETS, then rnd, nor and the digicam modes).
     .syntax unified
     .arm
     .include "palettes.inc"               @ NPAL, RND_MODE, NORMAL_MODE, SS_*, LCD_TAG_DATA
@@ -80,10 +78,10 @@ lcd_hook:
     ldr     r0, =CFG
     ldrb    r0, [r0, #CFG_MODE]
 max_lcd:
-    cmp     r0, #NPAL + NORMAL_MODE
+    cmp     r0, #NPAL + NORMAL_MODE + NDIGI
     movhi   r0, #0                        @ not a mode: the first (as lut_fill)
 npal_lcd:
-    cmp     r0, #NPAL                     @ rnd and nor follow the MAX_PRESETS presets' entries
+    cmp     r0, #NPAL                     @ rnd, nor and the digicam modes follow the MAX_PRESETS presets' entries
     addhs   r0, r0, #MAX_PRESETS
 npal_lcd2:
     subhs   r0, r0, #NPAL
@@ -117,16 +115,10 @@ center_hook:                            @ r0-r3 and [sp] are MSG_POST's argument
     ldrb    r0, [r1, #CFG_MODE]
     mov     r2, r0                        @ r2 = the mode before
 max_center:
-    cmp     r0, #NPAL + NORMAL_MODE
+    cmp     r0, #NPAL + NORMAL_MODE + NDIGI
     movhi   r0, #0                        @ not a mode: the first
-npal1_center:
-    cmp     r0, #NPAL + 1
-    mvneq   r0, #0                        @ after the normal mode: the first
-    add     r0, r0, #1                    @ next preset, after the last rnd (if
-last_center:                              @  RND_MODE), then the normal mode (if
-    cmp     r0, #NPAL - 1 + RND_MODE      @  NORMAL_MODE), then the first again
-after_last:
-    movhi   r0, #(NPAL + 1) * NORMAL_MODE
+    mvneq   r0, #0                        @ after the last mode: the first
+    add     r0, r0, #1                    @ next: presets, rnd, nor, the digicam modes
     strb    r0, [r1, #CFG_MODE]
     mov     r3, #1
     strb    r3, [r1, #CFG_DIRTY]          @ save it at power-off
@@ -162,16 +154,14 @@ after_last:
 1:  pop     {r0-r3, lr}
     b       MSG_POST                      @ returns to the key handler
 
-@ r0 = a mode -> r0 = 1 if it is the normal mode, else 0 (not a mode counts
-@ as the first preset, as in lut_fill).
+@ r0 = a mode -> r0 = 1 if it takes the factory's sizes (the normal mode or
+@ a digicam mode), else 0 (not a mode counts as the first preset, as in
+@ lut_fill).
 is_normal:
-max_normal:
-    cmp     r0, #NPAL + NORMAL_MODE
+    sub     r0, r0, #NPAL + 1
+    cmp     r0, #NDIGI
+    movls   r0, #1
     movhi   r0, #0
-npal1_normal:
-    cmp     r0, #NPAL + 1
-    moveq   r0, #1
-    movne   r0, #0
     mov     pc, lr
 
 @ The arrow keys' aspect change, FUN_000213e0(delta) (aspect_jump.s): in the

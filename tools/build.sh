@@ -80,6 +80,7 @@ print(f'{start:#x}:{old.hex()}:{new.hex()}')
 # photo cave: it goes in the unused end of the fx4 cave's dead range,
 # 0xbbc00-0xbc400 (see tools/patches/preset_data.s).
 python3 -I tools/palettes.py asm > build/obj/palettes.inc
+python3 -I tools/digicam.py asm > build/obj/digicam.inc   # the digicam modes' ISP profiles
 nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
     $LLVM/llvm-nm "build/obj/$1.o" | awk -v s="$2" '$3 == s { print "0x" $1 }'
 }
@@ -88,7 +89,8 @@ CAVE=$(asm photo_cave 0xbab6c 0xbb340 \
     --defsym=MATCH_ADDR=$(nmsym preset_data MATCH_PALETTES) --defsym=PMATCH_ADDR=$(nmsym preset_data PRESET_MATCH) \
     --defsym=DPTRS_ADDR=$(nmsym preset_data DISPLAY_PTRS) --defsym=TAGS_ADDR=$(nmsym preset_data TAGS) \
     --defsym=FX_ADDR=$(nmsym preset_data PRESET_FX) \
-    --defsym=GBTONE_ADDR=$(nmsym preset_data gb_tone_fill) --defsym=UDIV_ADDR=$(nmsym preset_data udiv))  # dead FUN_000bab6c
+    --defsym=GBTONE_ADDR=$(nmsym preset_data gb_tone_fill) --defsym=UDIV_ADDR=$(nmsym preset_data udiv) \
+    --defsym=ISPPROF_ADDR=$(nmsym preset_data isp_profile))  # dead FUN_000bab6c
 sym() {  # address of a label in the assembled photo cave
     nmsym photo_cave "$1"
 }
@@ -173,6 +175,14 @@ if [ "$EXIF" = "1" ]; then
     MJUMP2=$(asm bl_jump 0x8ca1c 0x8ca20 --defsym=AT=0x8ca1c --defsym=HOOK=$MHOOK)
     EXIF_PATCHES="$ECAVE $EJUMP $MTIME $MMETA $MJUMP1 $MJUMP2"
 fi
+# The digicam modes' date stamp: the firmware's own photo stamp (FUN_00019568,
+# off in the stock settings), which isp_profile (photo_cave.s) turns on per
+# photo in a digicam mode. As '26 11 05 (format at 0xd0fc8, its length check
+# at 0x1c164, year_fix for the two-digit year at the snprintf's bl, 0x1c160),
+# in orange (the literal at 0x1c650: Y << 16 | U << 8 | V).
+STAMP_PATCHES="0xd0fc8:$(python3 -I -c "print(b'%04u/%02u/%02u %02u:%02u:%02u\0'.hex())"):$(python3 -I -c "print(b\"'%02u %02u %02u\".ljust(30, b'\0').hex())")
+    0x1c164:130050e3:090050e3 0x1c650:8080ff00:c334a100
+    $(asm bl_jump 0x1c160 0x1c164 --defsym=AT=0x1c160 --defsym=HOOK=$(nmsym preset_data year_fix))"
 # Resolution jump table @0xf3d0 (ldrls pc,[pc,idx,lsl#2] @0xf3c8): entries hold
 # absolute handler addresses, so point each photo aspect ratio straight at its
 # cave stub. 0/1=16:9 1920, 2=3:2 1616, 3=4:3 1440, 4=1:1 1024; b/c = hi-res.
@@ -186,7 +196,7 @@ jt() {  # jt ENTRY OLDHEX LABEL -> ENTRY:OLDHEX:<label address, little-endian>
 NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" "$FX4CAVE" $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" "$FX4CAVE" $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES $STAMP_PATCHES \
     "$(jt 0xf3d0 9cf70000 stub169)" \
     "$(jt 0xf3d4 9cf70000 stub169)" \
     "$(jt 0xf3d8 b0f70000 stub32)" \

@@ -235,9 +235,11 @@ if __name__ == '__main__':
         cfg = palettes.config()                        # as build.sh built them (PRESETS_JSON)
         pre = cfg['presets']
         NOR = len(pre) + 1                             # the normal mode's byte
-        # the center button's cycle: the presets, rnd, the normal mode (those two if on)
-        modes = list(range(len(pre))) + [len(pre)] * cfg['rnd'] + [NOR] * cfg.get('normal', False)
-        code = lambda mode: pre[mode]['tag'] if mode < len(pre) else palettes.RND if mode == len(pre) else palettes.NORMAL
+        # the center button's cycle: the presets, rnd, the normal mode, the digicam modes
+        DIG = [NOR + 1 + i for i in range(len(palettes.DIGI))]
+        modes = list(range(len(pre))) + [len(pre)] * cfg['rnd'] + [NOR] * cfg.get('normal', False) + DIG
+        code = lambda mode: (pre[mode]['tag'] if mode < len(pre) else palettes.RND if mode == len(pre)
+                             else ([palettes.NORMAL] + palettes.DIGI)[mode - NOR])
         segments = lambda mode: pre[mode]['lcd'] if mode < len(pre) else palettes.lcd_segments(code(mode))
         lcd_text = lambda mode: ''.join(glyph[frozenset(s)] for s in segments(mode))
         SS = set(range(palettes.SS_FIRST, palettes.SS_FIRST + palettes.SS_COUNT))
@@ -300,7 +302,7 @@ if __name__ == '__main__':
         check('photo mode, everything outside the SS cells as stock', outside, set())
         ASPECT, ASPECT_SAVE = 0x1217bd, CFG + 0xf2      # the UI's aspect, and the user's one in the normal mode
         NIDX = [6, 7, 8, 10, 13]                        # the normal mode's slot for each aspect 0-4
-        cls = lambda mode: mode == NOR
+        cls = lambda mode: mode == NOR or mode in DIG    # the factory's sizes
         uc.mem_write(ASPECT, bytes([2]))                # 3:2 selected
         for n in range(1, len(modes) + 1):             # cycle through every mode and back
             state = n % 2                              # alternate photo and video mode

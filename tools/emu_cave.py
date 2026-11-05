@@ -30,7 +30,7 @@ import os, struct, subprocess, sys
 import numpy as np
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
-from palettes import LUT, SIZES, WY, config
+from palettes import DIGI, LUT, SIZES, WY, config
 from sim_look import look_blocks
 from sim_palette import add_tag, prepare
 
@@ -40,6 +40,8 @@ RESUME, RESUME187 = 0x1544c, 0x187c8
 CACHE_INV, CACHE_CLEAN, MALLOC = 0x401ac, 0x401b8, 0x5374c
 PHOTO, STRIP_BYTES, TICK = 0x1317ac, 0x13155c, 0x126b80
 CFG_MODE = 0x132160 + 0xf1          # the preset mode byte in the camera's saved settings
+ISP_CTX, CTX, STAMP_EN = 0x12846c, 0xa00000, 0x131bf8
+GAMMA_SET, CCM_SET = 0x981fc, 0x982a4  # ISP reloads: stubbed, they record ctx+0x177c / ctx+0x1794
 STRIP_A, HEAP, STACK = 0x400000, 0x800000, 0xf00000
 W, ROWS = 640, 64
 
@@ -59,7 +61,11 @@ def machine():
     calls = []
 
     def on_code(uc, addr, size, _):
-        if addr in (CACHE_INV, CACHE_CLEAN, MALLOC):
+        if addr in (GAMMA_SET, CCM_SET):
+            off = 0x177c if addr == GAMMA_SET else 0x1794
+            calls.append((addr, struct.unpack('<I', uc.mem_read(CTX + off, 4))[0], 0))
+            uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
+        elif addr in (CACHE_INV, CACHE_CLEAN, MALLOC):
             calls.append((addr, uc.reg_read(UC_ARM_REG_R0), uc.reg_read(UC_ARM_REG_R1)))
             if addr == MALLOC:
                 uc.reg_write(UC_ARM_REG_R0, HEAP)
@@ -67,6 +73,7 @@ def machine():
         elif addr in (RESUME, RESUME187):
             uc.emu_stop()
     uc.hook_add(UC_HOOK_CODE, on_code)
+    uc.mem_write(ISP_CTX, struct.pack('<I', CTX))
     return uc, calls
 
 
@@ -125,6 +132,9 @@ def main():
     pre = cfg['presets']
     rnd = len(pre)                                    # MODE value for random
     nor = [rnd + 1] if cfg.get('normal') else []      # and for the normal mode
+    nor += [rnd + 2 + i for i in range(len(DIGI))] if nor else []   # and the digicam modes (no effect either)
+    prof = symbols('build/obj/preset_data.o')['PROFILES']
+    profiles = [struct.unpack_from('<2I', open(FW, 'rb').read(), APP + prof + 8 * i) for i in range(len(DIGI) + 1)]
     tags = cfg.get('tags', True)
     uc, calls = machine()
     fill, steps = [0], [0]
@@ -133,7 +143,7 @@ def main():
     kinds = {CACHE_INV: 'inv', CACHE_CLEAN: 'clean', MALLOC: 'malloc'}
     worst, table, ok, n = 0, None, True, 0           # table: the preset the table holds, while on
     widths = sorted({o[0] for _, o in SIZES.values()}, reverse=True)
-    all_modes = list(range(rnd)) + [0, 0, 2, 2] + [rnd] * 6 + nor + [1, 0x37] + nor + [1]   # 0x37: not a mode = the first
+    all_modes = list(range(rnd)) + [0, 0, 2, 2] + [rnd] * 6 + nor + [1, 0x37] + nor[::-1] + [1]   # 0x37: not a mode = the first
     for W in widths:
       src = prepare(photo, W)
       per_strip = []
@@ -145,6 +155,11 @@ def main():
         calls.clear()
         fill[0] = 0
         assert run(uc, sym['idx_stub']) == RESUME187
+        k = mode - rnd - 1 if rnd + 1 < mode <= rnd + len(DIGI) + 1 else 0     # the ISP profile
+        isp = [(a, v) for a, v, _ in calls if a in (GAMMA_SET, CCM_SET)]
+        ok &= isp == [(GAMMA_SET, profiles[k][0]), (CCM_SET, profiles[k][1])]
+        ok &= uc.mem_read(STAMP_EN, 1)[0] == (k > 0)
+        calls[:] = [c for c in calls if c[0] not in (GAMMA_SET, CCM_SET)]
         cur_pal = struct.unpack('<I', uc.mem_read(sym['VARS'] + 4, 4))[0]
         normal = mode in nor
         idx = struct.unpack('<I', uc.mem_read(sym['VARS'] + 8, 4))[0] if mode == rnd else mode if mode < rnd else 0
@@ -176,7 +191,7 @@ def main():
                 add_tag(ref, tag, D)
             diffs.append(differing(Y, UV, np.array(D)[ref]).mean() * 100)
         worst = max(worst, *diffs)
-        print(f'mode {"rnd" if mode == rnd else "nor" if normal else hex(mode)}: preset {"-" if normal else idx} {tag} '
+        print(f'mode {"rnd" if mode == rnd else (["nor"] + DIGI)[mode - rnd - 1] if normal else hex(mode)}: preset {"-" if normal else idx} {tag} '
               f'({"normal" if normal else f"{len(P)} colours"}, c{p.get("contrast", 0)} b{p.get("brightness", 0)})'
               f'{"" if want else " WRONG PRESET"}, table {"filled" if refilled else "kept"}'
               f'{"" if refilled == want_fill else " (WRONG)"}, blocks differing from sim: '

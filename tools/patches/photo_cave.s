@@ -40,6 +40,7 @@ base:
     .set    CACHE_INV,   base + 0x401ac
     .set    CACHE_CLEAN, base + 0x401b8
     .set    MALLOC,      base + 0x5374c   @ pvPortMalloc(size, align)
+    .set    ISP_PROFILE, base + ISPPROF_ADDR  @ preset_data.s: set the ISP profile r1
     .equ    PHOTO,       0x1317ac
     .equ    STRIP_BYTES, 0x13155c
     .equ    TICK,        0x126b80         @ FreeRTOS xTickCount
@@ -285,13 +286,17 @@ lut_fill:
     ldr     r0, =CFG
     ldrb    r0, [r0, #CFG_MODE]
 max_fill:
-    cmp     r0, #NPAL + NORMAL_MODE
+    cmp     r0, #NPAL + NORMAL_MODE + NDIGI
     movhi   r0, #0                        @ not a mode (e.g. never set): the first
+    subs    r1, r0, #NPAL + 1             @ r1 = the ISP profile: the digicam modes'
+    movls   r1, #0                        @  (1..), else stock (0)
+    mov     lr, pc
+    b       ISP_PROFILE
 npal1_fill:
-    cmp     r0, #NPAL + 1                 @ the normal mode: no effect
-    moveq   r1, #0
-    streq   r1, [r4, #CUR_PAL]
-    beq     9f
+    cmp     r0, #NPAL + 1                 @ the normal and digicam modes: no effect
+    movhs   r1, #0
+    strhs   r1, [r4, #CUR_PAL]
+    bhs     9f
 npal_fill:
     cmp     r0, #NPAL
     bne     1f                            @ a preset; == NPAL is rnd:
