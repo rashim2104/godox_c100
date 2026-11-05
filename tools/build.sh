@@ -163,6 +163,18 @@ if [ "$STORY" = "1" ]; then
         $(hook bl 0x1dd44 story_left) $(hook bl 0x1deac story_right) $(hook bl 0x1ddf8 story_center)
         $(hook b 0x1dff8 story_shutter)"
 fi
+# EXIF in every photo (EXIF=1, default; EXIF=0 leaves it out): make, model,
+# software, artist, date and time (from the RTC; set it with TIME.TXT), its
+# UTC offset and the pixel size. See tools/exif.py (EXIF_ARTIST, EXIF_OFFSET,
+# ...) and tools/patches/exif_cave.s, in the dead FUN_000bb3f8.
+EXIF=${EXIF:-1}
+EXIF_PATCHES=""
+if [ "$EXIF" = "1" ]; then
+    python3 -I tools/exif.py asm > build/obj/exif.inc
+    ECAVE=$(asm exif_cave 0xbb3f8 0xbb774)
+    EJUMP=$(asm exif_jump 0x18328 0x1832c --defsym=HOOK=$(nmsym exif_cave exif_write))
+    EXIF_PATCHES="$ECAVE $EJUMP"
+fi
 # Resolution jump table @0xf3d0 (ldrls pc,[pc,idx,lsl#2] @0xf3c8): entries hold
 # absolute handler addresses, so point each photo aspect ratio straight at its
 # cave stub. 0/1=16:9 1920, 2=3:2 1616, 3=4:3 1440, 4=1:1 1024; b/c = hi-res.
@@ -186,7 +198,7 @@ if [ "$SMALLVID" = "1" ]; then
         $(jt 0xf0a8 a8f60000 vid32) $(jt 0xf0ac 88f60000 vid43) $(jt 0xf0b0 98f60000 vid11)"
 fi
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" $VFX_PATCHES $LCD_PATCHES $STORY_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$PDATA" "$CAVE" $VFX_PATCHES $LCD_PATCHES $STORY_PATCHES $EXIF_PATCHES \
     "$(jt 0xf3d0 9cf70000 stub169)" \
     "$(jt 0xf3d4 9cf70000 stub169)" \
     "$(jt 0xf3d8 b0f70000 stub32)" \
