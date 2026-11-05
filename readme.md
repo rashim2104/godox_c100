@@ -1,39 +1,12 @@
 # Patching the C100's firmware to take retro dithered pics
 
-I'm not that much of a hardware tinkerer, but AI is getting so good, that it had no problem disassembling and patching the firmware of this toy camera, so that I could get it to take cool retro pictures. Pixelated, dithered, and color graded:
-
-<table>
-    <tr>
-        <td><img src="./site/img/IMG_0683.jpg" /></td>
-        <td><img src="./site/img/IMG_0737.jpg" /></td>
-        <td><img src="./site/img/IMG_0700.jpg" /></td>
-        <td><img src="./site/img/IMG_0745.jpg" /></td>
-    </tr>
-    <tr>
-        <td><img src="./site/img/IMG_0622.jpg" /></td>
-        <td><img src="./site/img/IMG_0639.jpg" /></td>
-        <td><img src="./site/img/IMG_0519.jpg" /></td>
-        <td><img src="./site/img/IMG_0545.jpg" /></td>
-    </tr>
-    <tr>
-        <td><img src="./site/img/IMG_0704.jpg" /></td>
-        <td><img src="./site/img/IMG_0612.jpg" /></td>
-        <td><img src="./site/img/IMG_0614.jpg" /></td>
-        <td><img src="./site/img/IMG_0629.jpg" /></td>
-    </tr>
-    <tr>
-        <td><img src="./site/img/IMG_0645.jpg" /></td>
-        <td><img src="./site/img/IMG_0260.jpg" /></td>
-        <td><img src="./site/img/IMG_0279.jpg" /></td>
-        <td><img src="./site/img/IMG_0250.jpg" /></td>
-    </tr>
-</table>
+I'm not that much of a hardware tinkerer, but AI is getting so good, that it had no problem disassembling and patching the firmware of this toy camera, so that I could get it to take cool retro pictures. Pixelated, dithered, and color graded.
 
 ## How to get this on your Godox C100
 
 ### Step 1
 
-Copy the file [`build_backups/v020_video_274k.bin`](./build_backups/v020_video_274k.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
+Copy the file [`build_backups/v027_exif_video.bin`](./build_backups/v027_exif_video.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
 
 _Either you connect via USB-C while the Godox is on, copy and rename the file, eject, and turn of the Godox; or you insert the SD card using a connector to your computer and then place it back in the turned-off Godox._
 
