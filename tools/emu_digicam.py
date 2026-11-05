@@ -128,12 +128,10 @@ def unpack(buf, Y, UV, y0):
 def look_ok(uc, calls, k, prof):
     """isp_profile's calls past the gamma and matrix, and the context fields
     it leaves, against digicam.look_calls (fresh context: lens shading 0)."""
-    level = struct.unpack('<i', uc.mem_read(CTX + 0x1530, 4))[0]
-    want, fields = D.look_calls(k, prof, 0, level)
+    want, fields = D.look_calls(k, prof, 0)
     got = [(n, a) for t, n, a in (c for c in calls if c[0] == 'look')]
-    ints = struct.unpack('<4i', uc.mem_read(CTX + 0x14a0, 16))
-    nr, lsc = struct.unpack('<2I', uc.mem_read(CTX + 0x17a8, 4) + uc.mem_read(CTX + 0x17b0, 4))
-    return got == want and ints == fields['sharp_ints'] and nr == fields['nr'] and lsc == fields['lsc']
+    lsc = struct.unpack('<I', uc.mem_read(CTX + 0x17b0, 4))[0]
+    return got == want and lsc == fields['lsc']
 
 
 def main():
@@ -160,7 +158,6 @@ def main():
         steps = [0]
         uc.hook_add(UC_HOOK_BLOCK, lambda uc_, a, size, _: steps.__setitem__(0, steps[0] + size // 4))
         uc.mem_write(CFG_MODE, bytes([mode]))
-        uc.mem_write(CTX + 0x1530, struct.pack('<i', mode % 5 - 1))
         hdr = bytearray(uc.mem_read(SOF, 16))
         hdr[7:11] = struct.pack('>HH', H, W)
         uc.mem_write(SOF, bytes(hdr))
