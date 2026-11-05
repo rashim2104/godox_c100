@@ -326,5 +326,32 @@ if __name__ == '__main__':
             check(f'{table} size table: aspects 0-4 stock', [entry(fw, base, i) for i in range(5)], [entry(orig, base, i) for i in range(5)])
             check(f'{table} size table: the old normal slots are the factory handlers of aspects 0-4',
                   [entry(fw, base, i) for i in (6, 7, 8, 10, 13)] == [entry(orig, base, i) for i in range(5)], True)
+        # The boot splash: rASHIM on the 7 cells instead of the logo, gone once
+        # the refresh draws, from then on the display as the factory's boots.
+        want = {(a, c) for a, n in enumerate(digicam.splash_nibbles()) for c in range(3) if n & (8 >> c)}
+        def boot(path, state):
+            global FW
+            keep, FW = FW, path
+            b_uc, b_lcd = machine()
+            FW = keep
+            call(b_uc, 0x4ad68)
+            first = lit(b_lcd.ram)
+            for addr, val in [(0x121706, state), (0x1217be, 0), (0x12170c, 0), (0x1217b0, 0), (REC_FLAGS, 0),
+                              (0xe3279, 1), (CFG + 0xeb, 15), (0x12170b, 1), (CFG + 0xea, 11)]:
+                b_uc.mem_write(addr, bytes([val]))
+            b_uc.mem_write(CFG + 0xec, struct.pack('<H', 400))
+            ticks = []
+            for _ in range(8):
+                call(b_uc, 0x21318)
+                ticks.append(lit(b_lcd.ram))
+            return first, ticks
+        first, _ = boot(FW, 0)
+        check('boot: init shows rASHIM, no logo', fmt(first), fmt(want))
+        for state in (0, 1, 2):
+            _, ticks = boot(FW, state)
+            _, stock = boot('build_backups/v001_original.bin', state)
+            check(f'boot (state {state}): splash until the readouts draw', [t >= want for t in ticks[:4]], [True] * 4)
+            check(f'boot (state {state}): from tick 6 as stock outside the SS cells',
+                  [fmt({sg for sg in t ^ st if sg[0] not in SS}) for t, st in zip(ticks[5:], stock[5:])], ['-'] * 3)
         print('mode test', 'PASSED' if ok else 'FAILED')
         sys.exit(0 if ok else 1)

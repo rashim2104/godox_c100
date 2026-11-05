@@ -131,20 +131,40 @@ def ccm(p):
 SEG7 = {'n': 'ceg', 'o': 'cdeg', 'r': 'eg', 'C': 'adef', 'd': 'bcdeg', 'Y': 'bcdfg', '2': 'abdeg',
         'K': 'acefg'}
 LCD = {'nor': 'nor', 'CCD': 'CCd', 'Y2K': 'Y2K'}
-# Segment -> (HT1621 address, COM) for each SS cell, left to right, found by
-# running the firmware's SS digit routines (FUN_0004a374, FUN_0004a1f0,
-# FUN_0004a074) for 0..9 in tools/emu_seg.py. Each cell is wired differently.
-# Addresses 0x0d..0x13 hold nothing but these 21 segments.
-SS_CELLS = [
+# Segment -> (HT1621 address, COM) for each 7-segment cell, left to right:
+# ISO 1-2, F 1-2, SS 1-3, found by running the firmware's digit routines
+# (FUN_00049ea8, FUN_0004a4ec, FUN_0004a074, FUN_0004a374, FUN_0004a1f0) for
+# 0..9 in tools/emu_seg.py. Each cell is wired differently. Addresses
+# 0x0d..0x13 hold nothing but the SS cells' 21 segments.
+CELLS = [
+    {'a': (0x01, 0), 'b': (0x02, 1), 'c': (0x02, 2), 'd': (0x01, 2), 'e': (0x00, 2), 'f': (0x00, 1), 'g': (0x01, 1)},
+    {'a': (0x04, 0), 'b': (0x05, 1), 'c': (0x05, 2), 'd': (0x04, 2), 'e': (0x03, 2), 'f': (0x03, 1), 'g': (0x04, 1)},
+    {'a': (0x07, 0), 'b': (0x08, 0), 'c': (0x09, 1), 'd': (0x08, 2), 'e': (0x07, 2), 'f': (0x07, 1), 'g': (0x08, 1)},
+    {'a': (0x0a, 0), 'b': (0x0b, 0), 'c': (0x0b, 1), 'd': (0x0b, 2), 'e': (0x0a, 2), 'f': (0x09, 0), 'g': (0x0a, 1)},
     {'a': (0x0d, 0), 'b': (0x0e, 0), 'c': (0x0f, 2), 'd': (0x0e, 2), 'e': (0x0d, 2), 'f': (0x0d, 1), 'g': (0x0e, 1)},
     {'a': (0x0f, 0), 'b': (0x10, 0), 'c': (0x11, 1), 'd': (0x11, 2), 'e': (0x10, 2), 'f': (0x0f, 1), 'g': (0x10, 1)},
     {'a': (0x12, 0), 'b': (0x13, 0), 'c': (0x13, 1), 'd': (0x13, 2), 'e': (0x12, 2), 'f': (0x11, 0), 'g': (0x12, 1)},
 ]
+SS_CELLS = CELLS[4:]
+# The boot splash, in place of the GODOX logo: "rASHIM" over all 7 cells (M
+# over two: its left and right halves).
+SPLASH = ['eg', 'abcefg', 'acdfg', 'bcefg', 'ef', 'abef', 'abcf']
+NSPLASH = 0x14          # HT1621 addresses the cells use, 0x00..0x13
 SS_FIRST, SS_COUNT = 0x0d, 7    # HT1621 addresses written
 
 
 def lcd_segments(mode):
     return [SEG7[g] for g in LCD[mode]]
+
+
+def splash_nibbles():
+    """Nibbles for HT1621 addresses 0..NSPLASH-1 that light SPLASH."""
+    nib = [0] * NSPLASH
+    for cell, segs in zip(CELLS, SPLASH):
+        for seg in segs:
+            addr, com = cell[seg]
+            nib[addr] |= 8 >> com
+    return nib
 
 
 def lcd_nibbles(segments):
@@ -245,6 +265,10 @@ def asm():
     print('    .macro  LCD_TAG_DATA                  @ per mode: HT1621 nibbles for the SS cells')
     for m in MODES:
         print('    .byte   ' + ', '.join(map(str, lcd_nibbles(lcd_segments(m)))) + f'   @ {m}')
+    print('    .endm')
+    print(f'    .equ    NSPLASH, {NSPLASH:#x}')
+    print('    .macro  SPLASH_DATA                   @ boot splash: HT1621 nibbles for addresses 0..NSPLASH-1')
+    print('    .byte   ' + ', '.join(map(str, splash_nibbles())))
     print('    .endm')
     print('    .macro  STAMP_DATA')
     print('SEGS:                                    @ x0, y0, x1, y1 per segment a..g, then the apostrophe')

@@ -84,7 +84,7 @@ print(f'{start:#x}:{old.hex()}:{new.hex()}')
 # (the capture handler, 0x187c4) the mode's ISP profile and the date stamp,
 # per strip (the scaler's callback, 0x15448) the stamp blended in. The center
 # button cycles the modes and the display's shutter-speed cells show the
-# current one (tools/patches/lcd_cave.s, 0xbc400-0xbc660: the refresh's tail
+# current one (tools/patches/lcd_cave.s, 0xbc400-0xbc744: the refresh's tail
 # call at 0x21218 and the center key's post at 0x1ddf8).
 python3 -I tools/digicam.py asm > build/obj/digicam.inc
 nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
@@ -93,42 +93,12 @@ nmsym() {  # nmsym OBJ LABEL: address of a label in an assembled cave
 CAVE=$(asm digicam_cave 0xbab6c 0xbb340)
 HOOK_JUMP=$(asm hook_jump 0x15448 0x1544c --defsym=HOOK=$(nmsym digicam_cave hook))
 CYC_JUMP=$(asm cyc_jump 0x187c4 0x187c8 --defsym=STUB=$(nmsym digicam_cave snap))
-STORY=${STORY:-1}
-LCAVE=$(asm lcd_cave 0xbc400 0xbc660)
+LCAVE=$(asm lcd_cave 0xbc400 0xbc744)
 LJUMP=$(asm lcd_jump 0x21218 0x2121c --defsym=HOOK=$(nmsym lcd_cave lcd_hook))
 KJUMP=$(asm key_jump 0x1ddf8 0x1ddfc --defsym=HOOK=$(nmsym lcd_cave center_hook))
-[ "$STORY" = "1" ] && KJUMP=""          # the story's center hook goes first, then center_hook
-# A story on the display at startup (STORY=1, default; STORY=0 leaves it out):
-# STORY.TXT from the SD card root (none there: no story), one line at a time
-# on the ISO/F/SS cells, the right arrow and the shutter to the next line, the
-# left arrow back, until past the last. Font from story/font.json (STORY_FONT), see tools/story.py
-# and tools/patches/story_cave.s. Caves in the rest of the dead code: the
-# drawing at 0xba74c-0xba91c (dead FUN_000ba74c), the file at 0xbb340-0xbb3f8
-# (the end of the digicam cave's dead function), the hooks at 0xbbb08-0xbbc00
-# (the end of a dead range, 0xbb774-0xbbc00) and the font at 0xbc660-0xbc744 (the end of
-# the display cave's). Hooks: the card mount (bl at 0x3e03c), the display
-# refresh (b at its start, 0x21318: only the line, nothing else, during the
-# story), the arrows' and center's posts (bl at 0x1dd44, 0x1deac, 0x1ddf8)
-# and the shutter (0x1dff8).
-STORY_PATCHES=""
-if [ "$STORY" = "1" ]; then
-    python3 -I tools/story.py asm > build/obj/story.inc
-    SDATA=$(asm story_data 0xbc660 0xbc744)
-    SCAVE=$(asm story_cave 0xba74c 0xba91c --defsym=FONT_ADDR=$(nmsym story_data FONT) \
-        --defsym=WIDE_ADDR=$(nmsym story_data WIDE) --defsym=PUT_ADDR=$(nmsym story_data put))
-    SVARS=$(nmsym story_cave VARS)
-    SLOAD=$(asm story_load 0xbb340 0xbb3f8 --defsym=VARS_ADDR=$SVARS --defsym=PATH_ADDR=$(nmsym story_cave PATH))
-    CENTER_NEXT=$(nmsym lcd_cave center_hook)
-    SHOOKS=$(asm story_hooks 0xbbb08 0xbbc00 --defsym=VARS_ADDR=$SVARS --defsym=CENTER_NEXT=$CENTER_NEXT \
-        --defsym=PREV_ADDR=$(nmsym story_cave story_prev) --defsym=DRAW_ADDR=$(nmsym story_cave draw))
-    hook() {  # hook b|bl AT LABEL: a branch at AT to a label of story_hooks / story_load
-        obj=story_hooks; [ "$3" = story_load ] && obj=story_load
-        asm "$1_jump" "$2" "$(printf '0x%x' $(($2 + 4)))" --defsym=AT=$2 --defsym=HOOK=$(nmsym $obj "$3")
-    }
-    STORY_PATCHES="$SDATA $SCAVE $SLOAD $SHOOKS $(hook bl 0x3e03c story_load) $(hook b 0x21318 story_refresh)
-        $(hook bl 0x1dd44 story_left) $(hook bl 0x1deac story_right) $(hook bl 0x1ddf8 story_center)
-        $(hook b 0x1dff8 story_shutter)"
-fi
+# The boot splash: "rASHIM" on the display's 7 cells instead of the GODOX
+# logo (the display init's tail call to the logo routine, 0x4ae38).
+SJUMP=$(asm b_jump 0x4ae38 0x4ae3c --defsym=AT=0x4ae38 --defsym=HOOK=$(nmsym lcd_cave splash))
 # EXIF in every photo (EXIF=1, default; EXIF=0 leaves it out): make, model,
 # software, artist, date and time (from the RTC; set it with TIME.TXT), its
 # UTC offset and the pixel size. See tools/exif.py (EXIF_ARTIST, EXIF_OFFSET,
@@ -157,5 +127,5 @@ fi
 NORMAL_PATCHES="0xf3e8:10f70000:9cf70000 0xf3ec:24f70000:9cf70000 0xf3f0:38f70000:b0f70000 0xf3f8:4cf70000:c4f70000 0xf404:88f70000:d4f60000
     0xf0b8:58f60000:f8f50000 0xf0bc:68f60000:f8f50000 0xf0c0:d8f70000:a8f60000 0xf0c8:d8f70000:88f60000 0xf0d4:d8f70000:98f60000"
 python3 tools/patch_code.py "$OUT" "$OUT" \
-    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" $KJUMP $STORY_PATCHES $EXIF_PATCHES \
+    "$HOOK_JUMP" "$CYC_JUMP" "$CAVE" "$LCAVE" "$LJUMP" "$KJUMP" "$SJUMP" $EXIF_PATCHES \
     $NORMAL_PATCHES $SPK_PATCHES

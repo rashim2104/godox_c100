@@ -22,11 +22,17 @@
 @ ap_peripheral_F_key_exe, an ADC key) posts message 0x7041 once per press;
 @ only the readout state acts on it (it cycles ISO/F/SS there; the arrows are
 @ IO_ISO = 0x7042 and T = 0x7043, aspect -1/+1 in photo and video mode).
-@ key_jump.s (or the story's center hook) points that post (bl 0x42c at
+@ key_jump.s points that post (bl 0x42c at
 @ 0x1ddf8) here: in photo and video mode, and not while recording, step the
 @ mode and mark the settings dirty (so the firmware saves them at power-off);
 @ then post the message as before. Every mode takes the factory's sizes, so
 @ nothing else changes.
+@
+@ splash: the display's init (FUN_0004ad68) clears all 25 addresses and ends
+@ in a tail call to the logo routine, 0x4a64c(1) (the GODOX logo, 16.1).
+@ b_jump.s points that tail call (0x4ae38) here instead: light "rASHIM" on
+@ the 7 cells (SPLASH_DATA) and leave the logo off. The refresh's readouts
+@ clear it when they first draw, where the factory's logo went off.
     .syntax unified
     .arm
     .include "digicam.inc"                @ NMODES, SS_*, LCD_TAG_DATA
@@ -88,7 +94,23 @@ center_hook:                            @ r0-r3 and [sp] are MSG_POST's argument
     strb    r3, [r1, #CFG_DIRTY]          @ save it at power-off
 1:  pop     {r0-r3, lr}
     b       MSG_POST                      @ returns to the key handler
+
+splash:
+    push    {r4, lr}
+    mov     r4, #0
+4:  ldr     r1, =SPLASH - base
+    ldrb    r1, [r1, r4]
+    cmp     r1, #0                        @ init cleared them all
+    movne   r0, r4
+    movne   lr, pc
+    bne     SEG_WRITE
+    add     r4, r4, #1
+    cmp     r4, #NSPLASH
+    blo     4b
+    pop     {r4, pc}
     .ltorg
 
+SPLASH:
+    SPLASH_DATA
 LCD_TAGS:
     LCD_TAG_DATA

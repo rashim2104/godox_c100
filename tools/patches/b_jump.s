@@ -1,5 +1,5 @@
 @ One `b HOOK` at AT (both from build.sh, --defsym), in place of an
-@ instruction or a tail call: the story's hooks (story_hooks.s).
+@ instruction or a tail call: the boot splash (lcd_cave.s splash).
     .syntax unified
     .arm
     .org    AT
