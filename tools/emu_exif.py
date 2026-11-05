@@ -5,7 +5,8 @@
 Takes the photo's first 0x270 bytes (the camera's JPEG header) as the
 template at 0xe2f50, enters at the patched tail call (0x18328) as
 FUN_0001808c does, stubs write (records what is written) and the RTC
-(2026-11-05 14:07:09, or -1 with --no-clock), and runs the firmware's own
+(2026-11-05 14:07:09, or -1 with --no-clock), plants an AE state (AE:
+338 lines, gain 81, a WB preset), and runs the firmware's own
 snprintf. Writes the recorded file plus the photo's scan data to OUT.jpg
 and checks the layout; `exiftool -validate OUT.jpg` checks the EXIF.
 """
@@ -20,13 +21,18 @@ TPL, TPL_LEN = 0xe2f50, 0x270
 HOOK_AT, WRITE, GETTIME = 0x18328, 0x385a0, 0x52bd4
 EXIT, STACK, FD = 0xfff000, 0xf00000, 7
 CLOCK = (9, 7, 14, 5, 11, 2026, 4)  # sec min hour mday mon year wday
+AE_LINES, AE_GAIN, WB_MODE = 0x1241a4, 0x1241a0, 0x1321f8
+AE = (338, 81, 3)  # 10 ms (1/100 s), gain 81/64 (ISO 126), a WB preset (manual)
 
 
-def run(jpg, clock=True):
+def run(jpg, clock=True, ae=AE):
     uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     uc.mem_map(0, 0x1000000)
     uc.mem_write(0, open(FW, 'rb').read()[APP:APP + 0x200000])
     uc.mem_write(TPL, jpg[:TPL_LEN])
+    uc.mem_write(AE_LINES, struct.pack('<I', ae[0]))
+    uc.mem_write(AE_GAIN, struct.pack('<I', ae[1]))
+    uc.mem_write(WB_MODE, bytes([ae[2]]))
     out = bytearray()
 
     def ret(r0=None):
