@@ -2,12 +2,13 @@
 
 _Last updated 2026-11-05_
 
-**Now (`v029`):** three modes on the center button, `nor` → `CCD` → `Y2K`:
+**Now (`v030`):** three modes on the center button, `nor` → `CCD` → `Y2K`:
 the factory camera, and two early-2000s digicam looks done in the camera's
 own ISP (full resolution, hardware JPEG), with an orange `05 11 '26` date
 stamp (DD MM 'YY) in the corner of every digicam photo. Synthesized digicam
 sounds (shutter "ka-chak", power-on chime, mode click). EXIF in every photo,
-UTC dates in videos, and a [story at startup](#a-story-at-startup).
+UTC dates in videos, and [`rASHIM` on the display at boot](#boot-splash) in
+place of the GODOX logo.
 
 The pixel-art presets (palettes, dithering, small photos and video, the site
 editor, `v009`–`v027`) are gone since `v029`; they are in git history and
@@ -22,7 +23,7 @@ editor, `v009`–`v027`) are gone since `v029`; they are in git history and
 | [Sounds](#sounds): shutter, power-on chime, mode click (`tools/sounds.py`) | emulator (`v029`) |
 | [Center button](#mode-button-and-display) cycles the mode in photo/video mode, display shows it, kept across power-off | on the camera, working (since `v017`) |
 | [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance; videos: UTC dates, make, model, artist | photos on the camera (`v026`); video `v027` |
-| [A story at startup](#a-story-at-startup) from `STORY.TXT` on the display's 7 cells | on the camera, working (`v025`) |
+| [Boot splash](#boot-splash): `rASHIM` on the display's 7 cells instead of the GODOX logo | emulator (`v030`) |
 
 Open: the ISP profile stays on after a digicam photo, so a video recorded
 next is graded too, until the next `nor` photo.
@@ -74,7 +75,6 @@ In `tools/`:
   |---|---|---|
   | `SILENT` | 0 | 1 = no sounds and the speaker amp never switched on; 0 = the [digicam sounds](#sounds) |
   | `SHUTTER_WAV`, `POWERON_WAV`, `CLICK_WAV` | `build/sounds/*.wav` | other sounds (11025 Hz mono 16-bit, at most the slot) |
-  | `STORY` | 1 | [a story at startup](#a-story-at-startup) from `STORY.TXT` on the card; 0 = left out |
   | `EXIF` | 1 | [EXIF](#exif) in photos, metadata in videos; 0 = left out |
 
   The UI/focus beep (`BEEP.wav`) is silenced in every build.
@@ -95,15 +95,12 @@ In `tools/`:
 - `emu_seg.py` — runs the display's segment code (HT1621) and the center
   button in the emulator against the factory firmware (see
   [The transparent display](#the-transparent-display-a-segment-panel-ht1621)).
-- `emu_story.py`, `emu_exif.py` — the story and EXIF in the emulator.
+- `emu_exif.py` — EXIF in the emulator.
 - `patch_code.py` — apply byte patches addressed by RAM address; refuses to
   touch the bootloader or the SD updater, and verifies the original bytes first.
 - `gp_res.py` — list/extract the resource table. `patch_res.py` — replace a
   resource (e.g. a WAV) in place, format- and size-checked. `mk_silence.py` —
   make a silent copy of a WAV (same header/size, data zeroed).
-- `story.py` — the [story's](#a-story-at-startup) font tables
-  (`story.py asm` → `story.inc`), the 7 cells' wiring and the reference
-  renderer. `story/maker.html` writes `STORY.TXT` and the font.
 - `exif.py` — the EXIF template. `gpzp.py` — decode/encode the GPZP UI
   images (see [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay)).
 
@@ -173,8 +170,8 @@ which shifts every address after them).
   strip routine for both hooks), GBC as a fourth built-in look and 6FP with 11
   colours, with the editor's contrast, brightness and sharpening for 6FP and
   BW. The site's default download until v025. Works on the camera (2026-10-26).
-- `v025_editor_template.bin` — v024 plus the [story at
-  startup](#a-story-at-startup) (silent, `SILENT=1`). The editor's template
+- `v025_editor_template.bin` — v024 plus the story at
+  startup (`STORY.TXT` on the 7 cells; removed in `v030`) (silent, `SILENT=1`). The editor's template
   and the site's default download until v028. Nothing else shows on
   the display during the story (the first v025 still showed the icons,
   brackets and battery). Works on the camera (2026-11-02).
@@ -189,6 +186,8 @@ which shifts every address after them).
 - `v029_digicam.bin` — the pixel presets removed: `nor`, `CCD`, `Y2K` only,
   our own date stamp, the digicam sounds. Works on the camera (2026-11-05,
   IMG_0031–0036).
+- `v030_splash.bin` — `rASHIM` at boot instead of the GODOX logo, the story
+  removed. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -204,7 +203,7 @@ at `0x15448` and returns to `0x1544c`).
 | tail call `b 0x20fd0` at `0x21218` | SS readout on the see-through display, every refresh tick | `lcd_hook` | mode on the display |
 | `bl 0x42c` at `0x1ddf8` (post `0x7041`) | center button, once per press | `center_hook` | step the mode |
 | `0x22b38`, `0x350f0`, `0x2ed50` | — | (NOPs, `SILENT=1` only) | speaker amp off |
-| `0x3e03c`, `0x21318`, `0x1dd44`, `0x1deac`, `0x1ddf8`, `0x1dff8` | card mount, refresh, arrows, center, shutter | `story_*` | [the story at startup](#a-story-at-startup) |
+| tail call `b 0x4a64c` at `0x4ae38` | display init, once at boot | `splash` | [`rASHIM` instead of the logo](#boot-splash) |
 | `0x18328`, `0x88180`, … | JPEG header write, MOV atoms | `exif_*`, `mov_*` | [EXIF](#exif) |
 
 **Digicam cave** (`digicam_cave.s`) — dead `FUN_000bab6c`, `0xbab6c–0xbb340`
@@ -215,9 +214,15 @@ two modes' gamma and matrix tables; ends `0xbb198` (~420 B free).
 
 **Display cave** (`lcd_cave.s`) — `0xbc400–0xbc660`, in the dead range
 `0xbb774–0xbc744` (unreferenced functions `FUN_000bb774…FUN_000bc19c`):
-`lcd_hook`, `center_hook`, `LCD_TAGS`; ends `0xbc4d5`. The story and the MOV
-metadata use other parts of that range (`0xbbaa0–0xbbc00`, `0xbc660–`);
-`0xbb774–0xbbaa0` and `0xbbc00–0xbc400` are free.
+`lcd_hook`, `center_hook`, `splash`, `SPLASH`, `LCD_TAGS`. The MOV metadata
+uses `0xbbaa0–0xbbb08`; the rest of the range is free (`v025`–`v029`'s
+story used `0xba74c–0xba91c`, `0xbb340–0xbb3f8`, `0xbbb08–0xbbc00` and
+`0xbc660–0xbc744`).
+
+Not dead after all, for the next search: `0x80c–0xc38` (unreferenced by
+branches, but `0x80c` is a timer callback passed at `0xcb8`, and `0xbf4` /
+`0xc18` are callback pointers at `0x24b4`) and `0xc589e–0xc5d30` (Thumb
+libm code with a Thumb branch into it from `0xc609c`).
 
 Only `hook` has a fixed address. `build.sh` reads every other address from
 the object files (`llvm-nm`) and patches the jumps with them.
@@ -629,6 +634,33 @@ commands, the logo and bracket segments, checks that every digit routine
 draws 7-segment digits (segment counts 6,2,5,5,4,5,6,3,7,6), decodes full
 refreshes back into ISO/F/SS readouts, and replays the boot sequence.
 
+### Boot splash
+
+The display's init (`FUN_0004ad68`) clears all 25 addresses and ends in a
+tail call to the logo routine, `b 0x4a64c` (r0 = 1: the GODOX logo, `16.1`)
+at `0x4ae38`. `b_jump.s` points it at `splash` (`lcd_cave.s`), which lights
+`rASHIM` on the 7 cells instead (`digicam.py SPLASH`, M over two cells;
+`SPLASH_DATA`, the nibbles for addresses `0x00`–`0x13`) through `seg_write`,
+and leaves the logo off. It stays through the refresh's first 4 calls (which
+return early) and goes when the readouts first draw (call 5), about where
+the factory's logo went off (call 6). If the sensor preview fails to start,
+`FUN_0004a670` still lights the logo, as stock.
+
+The 7 cells (`digicam.py CELLS`, found by running the firmware's digit
+routines for 0–9 in the emulator):
+
+| Cell | a | b | c | d | e | f | g |
+|---|---|---|---|---|---|---|---|
+| ISO 1 (`FUN_00049ea8`) | `01.0` | `02.1` | `02.2` | `01.2` | `00.2` | `00.1` | `01.1` |
+| ISO 2 (`FUN_00049ea8`) | `04.0` | `05.1` | `05.2` | `04.2` | `03.2` | `03.1` | `04.1` |
+| F 1 (`FUN_0004a4ec`) | `07.0` | `08.0` | `09.1` | `08.2` | `07.2` | `07.1` | `08.1` |
+| F 2 (`FUN_0004a074`) | `0a.0` | `0b.0` | `0b.1` | `0b.2` | `0a.2` | `09.0` | `0a.1` |
+| SS 1–3 | see [Mode button](#mode-button-and-display) | | | | | | |
+
+`emu_seg.py` checks that init lights exactly `rASHIM` and no logo, that it
+stays through the first 4 refresh calls, and that from the 6th the display
+is the factory's (outside the SS cells) in photo, video and readout state.
+
 ### Mode button and display
 
 In photo and video mode the **center button** cycles `nor` → `CCD` → `Y2K`
@@ -698,109 +730,6 @@ or aspect brackets. None of it can reach the see-through panel, which is
 driven only through the HT1621 pins. Whether the TFT code still runs at boot
 (with no TFT attached) has not been checked; it does not matter for the
 panel.
-
-### A story at startup
-
-If the SD card holds `STORY.TXT` in its root (since `v025`; `STORY=0`
-leaves the feature out, and the build is then exactly `v024`), the camera shows it at startup one
-line at a time on the 7 segment cells (ISO 1–2, F 1–2, SS 1–3), as
-[`story/maker.html`](../story/maker.html) shows it. The right arrow and the
-shutter go to the next line, the left arrow back one (it stays on the first),
-the center button does nothing, and none of them do what they otherwise would
-(no photo, no recording, no aspect or preset change). Past the last line the
-story is over: the buffer is freed, the whole display is drawn at once as
-stock, and the camera simply is in the mode the switch set (photo, video or
-the readout state); it was there all along, underneath. The story runs in
-all three modes. During it nothing else shows: no icons, brackets, battery,
-logo, labels or boxes, only the line (since the second `v025`, 2026-11-02;
-the first kept the icons, brackets and battery as stock).
-
-**The text.** One line per screen, at most 7 cells: a character per cell, W
-and M over two, unknown characters blank, and once a character doesn't fit,
-the rest of the line doesn't show. A `.` right after the 3rd character lights
-the F decimal point (`09.2`) and takes no cell. An empty line is a blank
-screen; a newline at the end of the file is not an extra screen. `\r\n`
-works, and a UTF-8 byte order mark is skipped. Up to 4 KB are read (hundreds
-of lines). The file is read once per power-on, when the card is first
-mounted, not when a card goes in later.
-
-**The font** is `story/font.json` (`STORY_FONT=` another), what the maker's
-"Copy font as JSON" writes: a character → its segments a..g, a two-cell
-glyph as `cdef|bcde`. `tools/story.py asm` turns it into `story.inc`: `FONT`
-(96 bytes for `0x20`–`0x7f`, bit 7 = two cells), `WIDE` (the second cells)
-and `WIRE`, the a..g wiring of all 7 cells, found like the SS cells' by
-running the firmware's digit routines for 0–9 in the emulator:
-
-| Cell | a | b | c | d | e | f | g |
-|---|---|---|---|---|---|---|---|
-| ISO 1 (`FUN_00049ea8`) | `01.0` | `02.1` | `02.2` | `01.2` | `00.2` | `00.1` | `01.1` |
-| ISO 2 (`FUN_00049ea8`) | `04.0` | `05.1` | `05.2` | `04.2` | `03.2` | `03.1` | `04.1` |
-| F 1 (`FUN_0004a4ec`) | `07.0` | `08.0` | `09.1` | `08.2` | `07.2` | `07.1` | `08.1` |
-| F 2 (`FUN_0004a074`) | `0a.0` | `0b.0` | `0b.1` | `0b.2` | `0a.2` | `09.0` | `0a.1` |
-| SS 1–3 | see [Mode button](#mode-button-and-display) | | | | | | |
-
-`story.py render()` is the reference for what a line lights (the maker does
-the same).
-
-**Hooks** (all in the stock code path unless a story is on, `LINE != 0`):
-
-| Hook | Was | Story |
-|---|---|---|
-| `bl` at `0x3e03c` → `story_load` | `bl 0x37f34` (write `VERSION.TXT`), right after the card mount checked `TIME.TXT`/`FORMAT.TXT` in the storage task | the first time: `open("G:\STORY.TXT", 0)`, `malloc(4096)`, `read`, `close` (`0x9e608`, `0x53750`, `0x9e67c`, `0x9dc7c`, as the SD update uses them), then on to `VERSION.TXT` |
-| `b` at `0x21318` → `story_refresh` | the display refresh's first instruction, `ldr r2, [pc, #0xac]` (`=0x1217be`); the refresh draws the readouts, and every other tick the icons and logo, the bracket and the battery | draw only the line and return: none of the stock drawing runs, so nothing else even flickers on |
-| `bl` at `0x1deac` / `0x1dd44` → `story_right` / `story_left` | the right / left arrow's post of `0x7043` / `0x7042` (after `0x7018`) | next / previous line, drawn at once |
-| `bl` at `0x1ddf8` → `story_center` | the center button's post, `0x7041` (with `LCDTAG=1` through `center_hook`) | nothing |
-| `b` at `0x1dff8` → `story_shutter` | `cmp r3, #2` in the shutter handler (`FUN_0001df64`, the "ok" key), just after its latch | next line, out through the handler's epilogue (`0x1e040`), posting nothing |
-
-The keys keep their stock debounce: the arrows' and center's latch
-`0x1217bc` (cleared by the timer `FUN_0001fdc8`) and the shutter's
-`0x12163d` (cleared by `FUN_0001fdfc`) are set before the hooks. `draw`
-writes all 25 HT1621 addresses through `seg_write`, all off but the line:
-every one the first time, after that only what differs from the firmware's
-copy (`SHADOW`). The firmware sometimes changes the copy before it sends
-(the icons routine sets the video icon `14.0` and the reticle `18.0` there,
-and a later routine sends them), so at the start the copy needn't be what
-the panel shows. Past the last line `story_next` runs one stock refresh at
-once, as an icon tick (`0x1217b0` = 1) and past its startup ticks
-(`0x1217be` = 1), and the icon, bracket and battery routines draw from their
-state every time, so everything is back at once. The card
-mount runs after the storage task's firmware-update check, so a story can't
-get in the way of re-flashing.
-
-**Caves** (the rest of the dead code; `build.sh` now stops the video and
-display caves where their code ends, which changes nothing without
-`STORY=0`):
-
-| Range | File | Contents |
-|---|---|---|
-| `0xba74c–0xba91c` | `story_cave.s` | `draw`, `story_prev`, `VARS` (`MEM`, `BUF`, `END`, `LINE`, `TRIED`, `SENT`), the path; dead `FUN_000ba74c` (no branch, pointer or `adr` into it) |
-| `0xbb340–0xbb3f8` | `story_load.s` | `story_load`; the end of the digicam cave's dead `FUN_000bab6c` |
-| `0xbbb08–0xbbc00` | `story_hooks.s` | the hooks, `story_next`; in the dead range after the MOV metadata |
-| `0xbc660–0xbc744` | `story_data.s` | `put`, `FONT`, `WIDE`, `WIRE`; after the display cave (2 B left) |
-
-Not dead after all, for the next search: `0x80c–0xc38` (unreferenced by
-branches, but `0x80c` is a timer callback passed at `0xcb8`, and `0xbf4` /
-`0xc18` are callback pointers at `0x24b4`) and `0xc589e–0xc5d30` (Thumb
-libm code with a Thumb branch into it from `0xc609c`).
-
-**Verified in the emulator** (`uv run --with unicorn tools/emu_story.py`,
-against `v024` side by side), in photo, video and the readout state: the
-mount reads the file once and goes on to `VERSION.TXT`, a second mount reads
-nothing; every line (W and M, the decimal point, a line too long, a blank
-line, `\r\n`, the byte order mark) lights exactly what `story.py` renders,
-and nothing else, though the display was lit before (a stock refresh, the
-logo, and the battery bars lit with the copy saying off); the right arrow, the shutter
-and the left arrow step through the stock key handlers and redraw at once,
-posting only the arrows' `0x7018`; left stays on the first line, the center
-button does nothing and leaves the preset mode alone; past the last line the
-buffer is freed, the whole display is stock at once and then the keys are stock
-(the shutter posts its capture, the center button steps the preset). No
-file, an empty one or one with only a byte order mark: no story, nothing
-kept. The whole font, character by character, as `story.py` renders it.
-`emu_seg.py` on the same build: the preset mode test passes. Not covered:
-the real card and file system (the calls are stubbed, the way the SD update
-makes them) and the timing of the card mount at boot; on the camera it
-works (2026-11-02).
 
 ## Ideas not yet done
 

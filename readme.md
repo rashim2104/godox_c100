@@ -2,13 +2,13 @@
 
 I'm not that much of a hardware tinkerer, but AI is getting so good, that it had no problem disassembling and patching the firmware of this toy camera, so that I could get it to take cool retro pictures.
 
-This fork turns it into a 2005 compact: the center button cycles `nor` (factory) → `CCD` (cool, punchy) → `Y2K` (warm, faded), graded in the camera's own ISP at full resolution, with an orange `05 11 '26` date stamp on digicam photos, digicam shutter and power-on sounds, and EXIF in every photo.
+This fork turns it into a 2005 compact: the center button cycles `nor` (factory) → `CCD` (cool, punchy) → `Y2K` (warm, faded), graded in the camera's own ISP at full resolution, with an orange `05 11 '26` date stamp on digicam photos, digicam shutter and power-on sounds, EXIF in every photo, and `rASHIM` on the display at boot instead of the GODOX logo.
 
 ## How to get this on your Godox C100
 
 ### Step 1
 
-Copy the file [`build_backups/v029_digicam.bin`](./build_backups/v029_digicam.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
+Copy the file [`build_backups/v030_splash.bin`](./build_backups/v030_splash.bin) (or any other older or newer version) to the root of the SD card of your Godox, and rename it to `GP_CARDVR_UPGRADE.BIN`.
 
 _Either you connect via USB-C while the Godox is on, copy and rename the file, eject, and turn of the Godox; or you insert the SD card using a connector to your computer and then place it back in the turned-off Godox._
 
