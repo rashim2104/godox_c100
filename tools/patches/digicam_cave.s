@@ -32,10 +32,6 @@ base:
     .set    GETTIME,     base + 0x52bd4   @ RTC: int t[7] (sec min hour mday mon year wday); 0 = set
     .set    GAMMA_SET,   base + 0x981fc   @ ISP: load the gamma at ctx+0x177c
     .set    CCM_SET,     base + 0x982a4   @ ISP: load the colour matrix at ctx+0x1794
-    .set    EDGE_SET,    base + 0x9852c   @ CDSP edge enhancer, r0 = amp gain 0..3
-    .set    SHARP_SET,   base + 0x914e8   @ YUV sharpen gain (reg 0x290 byte 2)
-    .set    HBNR_SET,    base + 0x915b0   @ HbNr on/off
-    .set    NR_SET,      base + 0x90af8   @ YUV NR thresholds (4 args)
     .set    LSC_SET,     base + 0x98810   @ lens shading, regenerated from ctx+0x17b0
     .equ    PHOTO,       0x1317ac
     .equ    STRIP_BYTES, 0x13155c
@@ -279,10 +275,9 @@ stamp_draw:
 
 @ ISP profile r1 (0 = stock, then CCD, Y2K, BW, NGT, SUN): point the ISP context's gamma
 @ (+0x177c) and colour matrix (+0x1794) at its tables and reload both
-@ (FUN_000981fc, FUN_000982a4, as the ISP's init does). Then its LOOKS: the
-@ edge enhancer's amp gain, the sharpen gain (also as the gain tuner's per
-@ level), HbNr, the NR thresholds (and the tuner's table) and lens shading
-@ (regenerated only when its strengths change). nor restores the stock ones.
+@ (FUN_000981fc, FUN_000982a4, as the ISP's init does). Then lens shading:
+@ off in the digicam modes (vignette), stock in nor; regenerated only when its
+@ strengths change.
 @ Every photo and recording, before its capture. All registers preserved.
 isp_profile:
     push    {r0-r12, lr}
@@ -294,8 +289,7 @@ isp_profile:
     cmp     r0, #0
     beq     1f
     mov     r6, r0                        @ r6 = the context
-    add     r10, r6, #0x1500
-    ldr     r10, [r10, #0x30]             @ r10 = the gain tuner's level, -1..3
+    mov     r7, r1                        @ r7 = the mode
     add     r0, r0, #0x1700
     str     r2, [r0, #0x7c]
     str     r3, [r0, #0x94]
@@ -304,54 +298,9 @@ isp_profile:
     mov     lr, pc
     b       CCM_SET
     ldr     r9, =PROFILES
-    add     r7, r9, #NMODES * 8
-    add     r7, r7, r1, lsl #2            @ r7 = the mode's LOOKS
-    ldrb    r0, [r7]
-    mov     lr, pc
-    b       EDGE_SET
-    ldrb    r0, [r7, #1]
-    add     r2, r6, #0x1400               @ the gain tuner's sharpen gains per
-    str     r0, [r2, #0xa0]               @  gain level (stock 0x20, 0x1d, 0x19,
-    sub     r3, r0, #3                    @  0x16), so it keeps ours
-    str     r3, [r2, #0xa4]
-    sub     r3, r0, #7
-    str     r3, [r2, #0xa8]
-    sub     r3, r0, #10
-    str     r3, [r2, #0xac]
-    add     r2, r2, #0xa0
-    movs    r4, r10                       @ the gain for the tuner's level
-    movmi   r4, #0
-    cmp     r4, #3
-    movgt   r4, #3
-    ldr     r0, [r2, r4, lsl #2]
-    mov     lr, pc
-    b       SHARP_SET
-    ldrb    r8, [r7, #2]                  @ r8 = flags
-    tst     r8, #1
-    moveq   r0, #1
-    movne   r0, #0
-    mov     lr, pc
-    b       HBNR_SET
     add     r5, r6, #0x1700
-    tst     r8, #2
-    addne   r3, r9, #NMODES * 12 + 8      @ NR_LOW
-    ldreq   r3, =0xd62e4
-    str     r3, [r5, #0xa8]               @ the tuner's NR table
-    adds    r4, r10, #1                   @ its row for the tuner's level
-    movmi   r4, #0
-    cmp     r4, #4
-    movgt   r4, #4
-    lsl     r0, r4, #4
-    sub     r0, r0, r4, lsl #1
-    add     r3, r3, r0
-    ldrh    r0, [r3, #6]
-    ldrh    r1, [r3, #8]
-    ldrh    r2, [r3, #10]
-    ldrh    r3, [r3, #12]
-    mov     lr, pc
-    b       NR_SET
-    tst     r8, #4
-    addne   r3, r9, #NMODES * 12          @ LSC_ZERO
+    cmp     r7, #0
+    addne   r3, r9, #NMODES * 8           @ LSC_ZERO
     ldreq   r3, =0xd6a9c
     ldr     r0, [r5, #0xb0]
     cmp     r0, r3

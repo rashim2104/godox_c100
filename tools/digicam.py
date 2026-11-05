@@ -141,50 +141,17 @@ PROFILES = {
 }
 
 
-# Beyond gamma and matrix, per mode (docs "More of the look"): the CDSP edge
-# enhancer's amp gain (0 = stock .. 3), the YUV sharpen gain (stock 0x20), and
-# flags: HbNr off, the YUV NR thresholds low (grain), lens shading off (the
-# lens's own falloff: darker corners).
-LOOK_HBNR_OFF, LOOK_NR_LOW, LOOK_LSC_OFF = 1, 2, 4
-LOOKS = {
-    'nor': (0, 0x20, 0),
-    'CCD': (2, 0x40, LOOK_HBNR_OFF | LOOK_NR_LOW | LOOK_LSC_OFF),
-    'Y2K': (1, 0x30, LOOK_LSC_OFF),
-    'BW': (2, 0x40, LOOK_HBNR_OFF | LOOK_NR_LOW | LOOK_LSC_OFF),
-    'NGT': (1, 0x20, LOOK_NR_LOW | LOOK_LSC_OFF),
-    'SUN': (0, 0x20, LOOK_LSC_OFF),
-}
-NR_STOCK, LSC_STOCK = 0xd62e4, 0xd6a9c      # ctx+0x17a8 and ctx+0x17b0 at init
-NR_STOCK_LEVEL0 = (1, 3, 5, 6)
+# Every digicam mode turns lens shading off (the lens's own falloff: darker
+# corners); nor restores it. Sharpening and NR stay the camera's: setting them
+# at capture overrode the capture path's NR (v032/v033, far too noisy).
+LSC_STOCK = 0xd6a9c                          # ctx+0x17b0 at init
 
 
-def nr_table(low):
-    """The YUV NR thresholds per gain level (36 shorts, 7 per level: three
-    fixed, then the four thresholds); low: every threshold halved (min 1)."""
-    fw = open(FW, 'rb').read()
-    t = list(struct.unpack_from('<36H', fw, APP + NR_STOCK))
-    if low:
-        for lv in range(5):
-            t[lv * 7 + 3:lv * 7 + 7] = [max(1, v // 2) for v in t[lv * 7 + 3:lv * 7 + 7]]
-    return t
-
-
-def look_calls(mode, profiles, lsc_before, level=0):
+def look_calls(mode, profiles, lsc_before):
     """What isp_profile calls after the gamma and matrix for mode index `mode`
-    (PROFILES at `profiles`), with ctx+0x17b0 at `lsc_before` and the gain
-    tuner at `level` (ctx+0x1530, -1..3): (name, args)."""
-    n = len(MODES)
-    ampga, sharp, flags = LOOKS[MODES[mode]]
-    lsc = profiles + 12 * n if flags & LOOK_LSC_OFF else LSC_STOCK
-    nr = profiles + 12 * n + 8 if flags & LOOK_NR_LOW else NR_STOCK
-    ints = (sharp, sharp - 3, sharp - 7, sharp - 10)
-    row = 7 * max(0, min(4, level + 1)) + 3
-    out = [('edge', (ampga,)), ('sharp', (ints[max(0, min(3, level))],)),
-           ('hbnr', (0 if flags & LOOK_HBNR_OFF else 1,)),
-           ('nr', tuple(nr_table(flags & LOOK_NR_LOW)[row:row + 4]))]
-    if lsc != lsc_before:
-        out.append(('lsc', (lsc,)))
-    return out, dict(sharp_ints=ints, nr=nr, lsc=lsc)
+    (PROFILES at `profiles`), with ctx+0x17b0 at `lsc_before`: (name, args)."""
+    lsc = profiles + 8 * len(MODES) if mode else LSC_STOCK
+    return ([('lsc', (lsc,))] if lsc != lsc_before else []), dict(lsc=lsc)
 
 
 def curves(p):
@@ -488,13 +455,8 @@ def asm():
     print('    .word   0xd8050, 0xd6338')
     for name in PROFILES:
         print(f'    .word   GAMMA_{name} - base, CCM_{name} - base')
-    print('LOOKS:                                  @ per mode: edge amp gain, sharpen gain, flags, 0')
-    for m in MODES:
-        print('    .byte   ' + ', '.join(map(str, LOOKS[m] + (0,))) + f'   @ {m}')
     print('LSC_ZERO:                               @ lens shading strengths 0: no correction')
     print('    .short  0, 0, 0, 0')
-    print('NR_LOW:                                 @ the YUV NR thresholds, all 1')
-    print('    .short  ' + ', '.join(map(str, nr_table(True))))
     for name, p in PROFILES.items():
         g = gamma(p)
         print(f'GAMMA_{name}:                           @ {name}: RGB gamma (0x90 bytes)')
@@ -540,9 +502,6 @@ def check():
         for r in range(3):
             assert abs(sum(rows[r * 3:r * 3 + 3]) - sum(m[r * 3:r * 3 + 3])) <= 2, (name, r)
     assert list(PROFILES) == MODES[1:]
-    assert list(LOOKS) == MODES and LOOKS['nor'] == (0, 0x20, 0)
-    assert all(0 <= e <= 3 and 10 <= g <= 0x7f for e, g, _ in LOOKS.values())
-    assert nr_table(False)[3:7] == list(NR_STOCK_LEVEL0) and len(nr_table(True)) == 36
     assert len(set(SEG7.values())) == len(SEG7)        # emu_seg reads glyphs back
     assert all(len(LCD[m]) == len(SS_CELLS) for m in MODES)
     t = curves(PROFILES['CCD'])
