@@ -46,6 +46,7 @@ small resolution, a limited colour palette, and dithering.
 | [Contrast and brightness per preset](#contrast-and-brightness-per-preset) (a luma map, also 5 instructions per block less) | on the camera, working (`v023`, 2026-10-26) |
 | [Game Boy Camera settings](#game-boy-camera-settings) per look: ramp, Game Boy tone, 4×4 pixels, sharpening; GBC as the fourth built-in look; 6FP with 11 colours (`v024`) | on the camera, working (`v024`, 2026-10-26) |
 | [A story at startup](#a-story-at-startup) from `STORY.TXT` on the display's 7 cells, arrows and shutter to step, nothing else on the display meanwhile (`v025`) | on the camera, working (`v025`, 2026-11-02) |
+| [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size (`v026`, `EXIF=1`) | built, emulator (`emu_exif.py`), `exiftool -validate` OK; not yet on the camera |
 
 Open: [repeated frames](#timing-and-headroom) in some dithered videos.
 
@@ -227,6 +228,8 @@ which shifts every address after them).
   editor's template and the site's default download. Nothing else shows on
   the display during the story (the first v025 still showed the icons,
   brackets and battery). Works on the camera (2026-11-02).
+- `v026_exif.bin` — v025 plus [EXIF](#exif) in every photo (silent,
+  `SILENT=1`). Emulator only so far. `EXIF=0` builds exactly v025.
 
 ## Code caves and hooks
 
@@ -928,6 +931,64 @@ presets, one with an edited palette through Kodachrome 64). The emulator
 tests pass on the default template, on 8 presets of up to 32 colours and on
 the downloaded config. With one preset rnd can only repeat it, so the editor
 offers rnd from two presets on.
+
+## EXIF
+
+The stock JPEGs have no APP1: only SOI, SOF0, a `GPEncode` COM, DQT, DRI,
+DHT and SOS, from a 0x270-byte header template at `0xe2f50`.
+`FUN_0001808c` fills in the photo's size (SOF0, height at +7, width at +9)
+and ends with a tail call `write(fd, template, 0x270)` (`b 0x385a0` at
+`0x18328`). `exif_jump.s` points that branch at `exif_write`
+(`exif_cave.s`), which writes the same file as SOI, APP1, then the
+template after its SOI. `FUN_000385a0` waits for the file task to take the
+data, so one static APP1 is enough. It runs once per photo in the camera task.
+
+The APP1 (401 B) comes from `tools/exif.py` at build time. Per photo the
+camera fills in only:
+
+- **Pixel size** (`ExifImageWidth/Height`), copied from the SOF0.
+- **The dates** (`DateTime`, `DateTimeOriginal`, `CreateDate`).
+  - They come from the RTC via `FUN_00052bd4(int t[7])`, which gives sec,
+    min, hour, mday, mon, year, wday and returns 0.
+  - The firmware's `snprintf` (`0xce234`) formats them.
+  - If the clock was never set, `FUN_00052bd4` returns -1, and the dates
+    are the blank `"    :  :     :  :  "` EXIF uses for unknown.
+  - An empty `TIME.TXT` in the card root sets the clock from the file's own
+    modified time (`FUN_00037914`, also `GODOX.TXT`).
+
+The rest is fixed at build time:
+
+- `EXIF_MAKE` (Godox), `EXIF_MODEL` (C100), `EXIF_SOFTWARE` (C100-V1.1.6)
+  and `EXIF_ARTIST`.
+- `EXIF_OFFSET` (+05:30) for the three `OffsetTime` tags. The camera has no
+  time zone.
+- 72 dpi, sRGB, `YCbCrPositioning` and `ComponentsConfiguration`, which
+  exiftool's JPEG checks require.
+- Every tag has its own value: shared values pass as TIFF but fail
+  `exiftool -validate`.
+
+**Cave:** the dead `FUN_000bb3f8`, `0xbb3f8–0xbb774`, used up to `0xbb6e8`.
+The only thing in the firmware that looks like a pointer into it is the
+word `0x000bb679` at `0xc4c60`. That word is fdlibm `pow`'s √3 threshold
+(`0xbb67a`), next to `0x3988e` (√(3/2)) and `0x43400000` (2⁵³), not an
+address.
+
+**Check:** `tools/emu_exif.py IMG.jpg OUT.jpg [--no-clock]`.
+- It runs `exif_write` from `0x18328` on a real photo's header, with the
+  RTC and write stubbed and the firmware's own snprintf.
+- It checks SOI, then APP1, then the untouched rest of the template, and
+  that the stack is balanced.
+- `exiftool -validate OUT.jpg` then reports OK.
+
+**Not written:** exposure time, gain/ISO and white balance.
+- The AE state is in globals: the GC2083 exposure table row, lines and gain
+  ×64 at `0x124174`, cached at `0x1241a0/4`, and the AWB gains at ISP
+  context `+0x1558`.
+- The lines-to-seconds factor (1014 lines at 30 fps?) and the sensor's
+  base ISO aren't confirmed.
+- The camera's own playback parses APP1 (`parse_app_exif`, `FUN_000789e8`).
+  The tags here are standard, but viewing photos on the camera is the first
+  thing to check on hardware.
 
 ## Video
 
