@@ -324,8 +324,11 @@ if __name__ == '__main__':
         orig = open('c100_v1.1.6_20260929/GP_CARDVR_UPGRADE.BIN', 'rb').read()
         fw = open(FW, 'rb').read()
         entry = lambda d, base, i: d[APP + base + 4 * i:APP + base + 4 * i + 4]
+        import photo  # SIZE* aspects point at size stubs instead: tools/emu_size.py checks them
+        sized = {s for k in photo.config() for s in photo.SLOTS[k]}
         for table, base in (('photo', 0xf3d0), ('video', 0xf0a0)):
-            check(f'{table} size table: aspects 0-4 stock', [entry(fw, base, i) for i in range(5)], [entry(orig, base, i) for i in range(5)])
+            own = [i for i in range(5) if table == 'video' or i not in sized]
+            check(f'{table} size table: aspects {own} stock', [entry(fw, base, i) for i in own], [entry(orig, base, i) for i in own])
             check(f'{table} size table: the old normal slots are the factory handlers of aspects 0-4',
                   [entry(fw, base, i) for i in (6, 7, 8, 10, 13)] == [entry(orig, base, i) for i in range(5)], True)
         # The boot splash: rASHIM on the 7 cells instead of the logo, gone once
