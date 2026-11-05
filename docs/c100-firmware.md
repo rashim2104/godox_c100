@@ -46,7 +46,7 @@ small resolution, a limited colour palette, and dithering.
 | [Contrast and brightness per preset](#contrast-and-brightness-per-preset) (a luma map, also 5 instructions per block less) | on the camera, working (`v023`, 2026-10-26) |
 | [Game Boy Camera settings](#game-boy-camera-settings) per look: ramp, Game Boy tone, 4×4 pixels, sharpening; GBC as the fourth built-in look; 6FP with 11 colours (`v024`) | on the camera, working (`v024`, 2026-10-26) |
 | [A story at startup](#a-story-at-startup) from `STORY.TXT` on the display's 7 cells, arrows and shutter to step, nothing else on the display meanwhile (`v025`) | on the camera, working (`v025`, 2026-11-02) |
-| [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance (`v026`, `EXIF=1`) | built, emulator (`emu_exif.py`), exiftool; not yet on the camera |
+| [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance (`v026`, `EXIF=1`); videos: UTC dates, make, model, artist (`v027`) | photos on the camera, working (`v026`, 2026-11-05); video part emulator only |
 
 Open: [repeated frames](#timing-and-headroom) in some dithered videos.
 
@@ -229,7 +229,9 @@ which shifts every address after them).
   the display during the story (the first v025 still showed the icons,
   brackets and battery). Works on the camera (2026-11-02).
 - `v026_exif.bin` — v025 plus [EXIF](#exif) in every photo (silent,
-  `SILENT=1`). Emulator only so far. `EXIF=0` builds exactly v025.
+  `SILENT=1`). Works on the camera (2026-11-05). `EXIF=0` builds exactly v025.
+- `v027_exif_video.bin` — v026 plus UTC dates and make, model, artist in
+  videos. Emulator only so far.
 
 ## Code caves and hooks
 
@@ -1007,6 +1009,30 @@ address. It is full: more tags need another cave.
   that the stack is balanced.
 - exiftool then shows 1/100 s, ISO 126, f/2.4 and manual WB, and
   `-validate` reports OK.
+
+**Videos** (also `EXIF=1`):
+- **Dates.** The mvhd writer `FUN_00088078` turns the file's FAT time
+  (local) into seconds since 1904, then subtracts 8 h (`sub #0x7000`,
+  `sub #0x80` at `0x88188`), as if the clock ran on China time. The tkhd and
+  mdhd writers always write `0xb9e3b1ce` (2002-10-29 03:32:30), from the
+  literal pools at `0x88bd0` and `0x88f9c`.
+  - `mov_time.s` rewrites `0x88180–0x88194` in place (the reload at
+    `0x88184` was redundant). It subtracts the `EXIF_OFFSET` offset
+    instead, then stores the time into both pools as well. Those pools are
+    in RAM, and mvhd is written before the tracks, so every track gets the
+    real UTC date.
+- **Make, model, artist.** The muxer writes moov as mvhd, then
+  `FUN_000884d8`, then the tracks. It does this twice: the `bl` at
+  `0x8c910` sizes moov, the one at `0x8ca1c` writes it.
+  - `FUN_000884d8` writes udta > meta > ilst from a key/value table at
+    `ctx+0x540`. Nothing ever fills that table, and the muxer's close
+    `free()`s its entries.
+  - `mov_meta.s` (`0xbbaa0`, the end of the video cave's dead range;
+    `video_cave` now ends there) takes both calls instead. It copies a fixed
+    59-byte udta from `tools/exif.py udta` and returns its length. That
+    udta holds `©mak`, `©mod` and `©ART` as QuickTime international text,
+    which exiftool reads as UserData Make, Model and Artist.
+  - The emulator checks the copy, and exiftool checks a MOV built around it.
 
 ## Video
 
