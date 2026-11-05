@@ -46,7 +46,7 @@ small resolution, a limited colour palette, and dithering.
 | [Contrast and brightness per preset](#contrast-and-brightness-per-preset) (a luma map, also 5 instructions per block less) | on the camera, working (`v023`, 2026-10-26) |
 | [Game Boy Camera settings](#game-boy-camera-settings) per look: ramp, Game Boy tone, 4×4 pixels, sharpening; GBC as the fourth built-in look; 6FP with 11 colours (`v024`) | on the camera, working (`v024`, 2026-10-26) |
 | [A story at startup](#a-story-at-startup) from `STORY.TXT` on the display's 7 cells, arrows and shutter to step, nothing else on the display meanwhile (`v025`) | on the camera, working (`v025`, 2026-11-02) |
-| [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size (`v026`, `EXIF=1`) | built, emulator (`emu_exif.py`), `exiftool -validate` OK; not yet on the camera |
+| [EXIF in every photo](#exif): make, model, software, artist, date/time from the RTC with its UTC offset, pixel size, exposure time, ISO, f/2.4, white balance (`v026`, `EXIF=1`) | built, emulator (`emu_exif.py`), exiftool; not yet on the camera |
 
 Open: [repeated frames](#timing-and-headroom) in some dithered videos.
 
@@ -943,11 +943,13 @@ and ends with a tail call `write(fd, template, 0x270)` (`b 0x385a0` at
 template after its SOI. `FUN_000385a0` waits for the file task to take the
 data, so one static APP1 is enough. It runs once per photo in the camera task.
 
-The APP1 (401 B) comes from `tools/exif.py` at build time. Per photo the
-camera fills in only:
+The APP1 (417 B) comes from `tools/exif.py` at build time. Per photo the
+camera fills in:
 
-- **Pixel size** (`ExifImageWidth/Height`), copied from the SOF0.
-- **The dates** (`DateTime`, `DateTimeOriginal`, `CreateDate`).
+- **Pixel size**, copied from the SOF0: `ImageWidth/Height` in IFD0 and
+  `ExifImageWidth/Height`. The IFD0 pair is kept on purpose; it gives
+  exiftool's two minor "not allowed in JPEG" warnings.
+- **`DateTimeOriginal` and `CreateDate`.**
   - They come from the RTC via `FUN_00052bd4(int t[7])`, which gives sec,
     min, hour, mday, mon, year, wday and returns 0.
   - The firmware's `snprintf` (`0xce234`) formats them.
@@ -955,40 +957,57 @@ camera fills in only:
     are the blank `"    :  :     :  :  "` EXIF uses for unknown.
   - An empty `TIME.TXT` in the card root sets the clock from the file's own
     modified time (`FUN_00037914`, also `GODOX.TXT`).
+- **`ExposureTime`** = lines × 30 / 1014000 s.
+  - Lines are what the AE (`FUN_0004c22c`) last programmed into the GC2083:
+    the cache at `0x1241a4`, stored at `0x4c36c` after the `0x0d03/0x0d04`
+    writes.
+  - The AE table (`0xd6d60`, rows {lines, gain ×64, 32}, 0..291) steps in
+    10 ms anti-banding units of 338 lines, so 1014 lines = 30 ms. The
+    firmware's own `t·G` double at `0x1217a8` uses the same lines / 1014 × 30 ms.
+  - Independently, VTS is 1125 (`0x0d41/42` in the init table at `0xd80e0`)
+    at 30 fps: 29.6 µs a line either way.
+  - Range: 1/33800 to 1/33 s. Only the 30 fps mode is used (mode index
+    `0x12419c` is only ever written 0).
+- **`ISOSpeedRatings`** = 100 × gain/64, from `0x1241a0`.
+  - This is the gain ×64 (× a multiplier that defaults to 1), stored at
+    `0x4c4f0` after the gain registers. Range: 100–3200.
+  - It is the firmware's own convention: the light meter
+    (`FUN_00021420(N, t, S)` at `0x217c0`) computes EV with S = 100 for
+    t × gain/64.
+  - The meter's later lux calibration (slope ~0.22) puts the real
+    sensitivity nearer 450 × gain/64. EXIF uses the nominal value.
+- **`WhiteBalance`**: 0 (auto) when the user setting `temp_awb`
+  (`0x132160 + 0x98`) is 0, else 1 (manual, one of the presets).
+- AE isn't locked for the capture, so exposure and ISO may be one frame
+  ahead of the photo.
 
 The rest is fixed at build time:
 
-- `EXIF_MAKE` (Godox), `EXIF_MODEL` (C100), `EXIF_SOFTWARE` (C100-V1.1.6)
-  and `EXIF_ARTIST`.
-- `EXIF_OFFSET` (+05:30) for the three `OffsetTime` tags. The camera has no
-  time zone.
+- `EXIF_MAKE` (Godox), `EXIF_MODEL` (C100), `EXIF_SOFTWARE` (C100-V1.1.6),
+  `EXIF_ARTIST`, and `EXIF_OFFSET` (+05:30) for `OffsetTimeOriginal`. The
+  camera has no time zone.
+- **`FNumber` 2.4**: the f-number the firmware's light meter uses for this
+  lens (double at `0x21a5c`). No focal length or sensor size is anywhere
+  in the firmware.
 - 72 dpi, sRGB, `YCbCrPositioning` and `ComponentsConfiguration`, which
   exiftool's JPEG checks require.
 - Every tag has its own value: shared values pass as TIFF but fail
   `exiftool -validate`.
 
-**Cave:** the dead `FUN_000bb3f8`, `0xbb3f8–0xbb774`, used up to `0xbb6e8`.
+**Cave:** the dead `FUN_000bb3f8`, `0xbb3f8–0xbb774`, used up to `0xbb764`.
 The only thing in the firmware that looks like a pointer into it is the
 word `0x000bb679` at `0xc4c60`. That word is fdlibm `pow`'s √3 threshold
 (`0xbb67a`), next to `0x3988e` (√(3/2)) and `0x43400000` (2⁵³), not an
-address.
+address. It is full: more tags need another cave.
 
 **Check:** `tools/emu_exif.py IMG.jpg OUT.jpg [--no-clock]`.
-- It runs `exif_write` from `0x18328` on a real photo's header, with the
-  RTC and write stubbed and the firmware's own snprintf.
+- It runs `exif_write` from `0x18328` on a real photo's header.
+- The RTC and write are stubbed, an AE state is planted (338 lines, gain
+  81, a WB preset), and the firmware's own snprintf runs.
 - It checks SOI, then APP1, then the untouched rest of the template, and
   that the stack is balanced.
-- `exiftool -validate OUT.jpg` then reports OK.
-
-**Not written:** exposure time, gain/ISO and white balance.
-- The AE state is in globals: the GC2083 exposure table row, lines and gain
-  ×64 at `0x124174`, cached at `0x1241a0/4`, and the AWB gains at ISP
-  context `+0x1558`.
-- The lines-to-seconds factor (1014 lines at 30 fps?) and the sensor's
-  base ISO aren't confirmed.
-- The camera's own playback parses APP1 (`parse_app_exif`, `FUN_000789e8`).
-  The tags here are standard, but viewing photos on the camera is the first
-  thing to check on hardware.
+- exiftool then shows 1/100 s, ISO 126, f/2.4 and manual WB, with only the
+  two minor IFD0 size warnings.
 
 ## Video
 
