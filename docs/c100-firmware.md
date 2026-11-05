@@ -2,15 +2,17 @@
 
 _Last updated 2026-11-02_
 
+**Since `v028`:** video is stock (factory sizes, no effect) and the site's
+editor is gone; photo looks, the story and EXIF stay. The video-effect notes
+below are history.
+
 **Working on the camera (`v025`):** pixel-art photos and videos at ~274k
 pixels for every aspect ratio, four presets (EP6, 6FP, BW and GBC, the Game
 Boy Camera look) plus rnd and the normal mode (no effect, the factory's sizes)
 chosen with the center button and remembered across power-off, contrast,
 brightness and the Game Boy Camera settings per preset, the preset's tag on
 photos and video and its code on the see-through display, and a silent
-camera, and a [story at startup](#a-story-at-startup) from `STORY.TXT` on the card. The preset data has fixed slots, so the
-[site's editor](#the-sites-firmware-editor) builds custom firmware (1–8
-presets, rnd, sounds) in the browser; those work on the camera too.
+camera, and a [story at startup](#a-story-at-startup) from `STORY.TXT` on the card.
 
 Goal: make the C100 produce pixel-art photos and videos in the spirit of the
 [Pixless camera](https://petapixel.com/2025/01/09/0-03-megapixel-pixless-camera-captures-charming-pixel-art-photos/):
@@ -38,7 +40,7 @@ small resolution, a limited colour palette, and dithering.
 | Photos at ~274k pixels per aspect (the old 3:2 count), video unchanged | on the camera, working (`v019`) |
 | Video at the photo sizes (hook takes any width up to `MAX_W`) | on the camera, working (`v020`) |
 | Preset data in fixed slots (8 presets × 32 colours), preset count and rnd patchable | on the camera, working (`v021`) |
-| [Site editor](#the-sites-firmware-editor) builds: own presets, S-curve, films, tags, display codes, rnd, sounds | on the camera, working (2026-10-18: photos, video, sounds, palettes) |
+| Site editor (removed in `v028`) builds: own presets, S-curve, films, tags, display codes, rnd, sounds | on the camera, working (2026-10-18: photos, video, sounds, palettes) |
 | Editor: no tag on photos and video (empty tag records) | built, `editor_check.sh` (2026-10-23) |
 | Editor: own photo/video size per aspect setting (`v022` template: a size table) | built, `editor_check.sh`; on the camera with the default sizes (`v023`) |
 | Table kept when the preset doesn't change (no ~60 ms fill before the capture) | built (`v015`), emulator |
@@ -53,7 +55,7 @@ Open: [repeated frames](#timing-and-headroom) in some dithered videos.
 Contents: [The device](#the-device) · [Image layout](#firmware-image-layout-gp_cardvr_upgradebin-v116) ·
 [Tooling](#tooling) · [Backups](#backups-in-build_backups) · [Code caves and hooks](#code-caves-and-hooks) ·
 [Photos](#photos) · [Palettes](#palettes) · [Presets](#presets) · [Video](#video) · [Sounds](#sounds) ·
-[Site editor](#the-sites-firmware-editor) · [Look knobs](#look-knobs-contrast--brightness) · [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay) ·
+[Look knobs](#look-knobs-contrast--brightness) · [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay) ·
 [History](#history-the-v1-effect) · [Ideas](#ideas-not-yet-done) · [Palette colours](#appendix-palette-colours)
 
 ## The device
@@ -97,12 +99,9 @@ In `tools/`:
   | Variable | Default | Effect |
   |---|---|---|
   | `SILENT` | 0 | 1 = no sounds and the speaker amp never switched on; 0 = Super Mario kick (shutter) and coin (power-on) |
-  | `SMALLVID` | 1 | 640-wide video at every aspect; 0 = stock full-size video |
-  | `VIDFX` | 1 | preset dithering + tag on video; 0 = plain small video |
-  | `VIDTIMING` | 0 | 1 = draw each video strip's hook time (test builds only) |
   | `LCDTAG` | 1 | 1 = the center button [cycles the preset mode](#preset-mode-center-button-and-display) and the display shows it; 0 = stock blank display, no button, always the first preset |
   | `STORY` | 1 | [a story at startup](#a-story-at-startup) from `STORY.TXT` on the card, if there is one (font `story/font.json`, `STORY_FONT`); 0 = left out |
-  | `PRESETS_JSON` | | the presets from a config file (the editor's shape, `palettes.py config()`), including each one's [contrast and brightness](#contrast-and-brightness-per-preset), rnd and the normal mode; else the built-in ones |
+  | `PRESETS_JSON` | | the presets from a config file (`palettes.py config()`), including each one's [contrast and brightness](#contrast-and-brightness-per-preset), rnd and the normal mode; else the built-in ones |
 
   e.g. `SILENT=1 sh tools/build.sh`. The UI/focus beep (`BEEP.wav`) is
   silenced in every build.
@@ -130,16 +129,13 @@ In `tools/`:
   `sim_dither.py` is the early grayscale-ramp version.
 - `sim_look.py` — the exact reference of a look on one strip of the camera's
   own data (since `v024`: luma map, Game Boy tone, sharpening, dither, ramp or
-  nearest colour, 2×2 or 4×4). `look_check.mjs` / `look_check.py` check the
-  editor's preview against it (part of `editor_check.sh`).
+  nearest colour, 2×2 or 4×4).
 - `emu_cave.py` — runs the built photo cave in an ARM emulator (Unicorn) and
   checks it pixel-for-pixel against `sim_look.py`, per look of the config
-  (`PRESETS_JSON`). `emu_video.py` — the same for the video hook, per look,
-  with its share of the frame time. Both run against `build/GP_CARDVR_UPGRADE.BIN`:
+  (`PRESETS_JSON`). It runs against `build/GP_CARDVR_UPGRADE.BIN`:
 
   ```
   uv run --with unicorn,numpy,pillow tools/emu_cave.py images/IMG_0184.jpg
-  uv run --with unicorn,numpy,pillow tools/emu_video.py images/IMG_0184.jpg   # add --timing for a VIDTIMING=1 build
   ```
 - `emu_seg.py` — runs the transparent display's segment code (HT1621) in the
   emulator and decodes what it sends to the panel (see
@@ -149,11 +145,7 @@ In `tools/`:
   renderer; `emu_story.py` runs the story in the emulator against `v024`.
   `story/maker.html` writes `STORY.TXT` and the font.
 - `gpzp.py` — decode/encode the GPZP UI images (see [UI graphics](#ui-graphics-gpzp-logos-and-the-osd-overlay)).
-- `editor_data.py` — builds the [editor's](#the-sites-firmware-editor) template
-  and writes `site/editor/` (patch offsets, palettes, sounds, preview photos).
-  `editor_check.sh` checks the editor's patcher against `build.sh`.
-
-  Build options for a custom config (what the editor makes): `PRESETS_JSON`
+- Build options for a custom config: `PRESETS_JSON`
   (presets, tags, display segments, rnd; see `palettes.py config()`),
   `SHUTTER_WAV`, `POWERON_WAV` (11025 Hz mono 16-bit, at most the slot).
 
@@ -238,17 +230,15 @@ which shifts every address after them).
 Everything is patched into dead code, and every hook replaces the first
 instruction of a firmware function with a branch to a cave, which re-runs that
 instruction and jumps back (e.g. the photo hook replaces `str lr, [sp, #-4]!`
-at `0x15448` and returns to `0x1544c`; the video hook replaces `ldr r3, [r0]`
-at `0x18d14` and returns to `0x18d18`).
+at `0x15448` and returns to `0x1544c`).
 
 | Hook point | When it runs | Cave entry | Purpose |
 |---|---|---|---|
 | `FUN_00015448` | scaler "strip ready" callback, photo only, **interrupt** | `hook` | photo pixel effect |
 | `FUN_000187c4` | capture handler, once per photo, camera task | `idx_stub` → `lut_build` | pick preset, fill table |
-| `FUN_00018d14` | each 64-row video strip → H.264 encoder, camera task | `vhook` | video pixel effect |
 | tail call `b 0x20fd0` at `0x21218` | SS readout on the see-through display, every refresh tick, peripheral task | `lcd_hook` | preset mode on the display |
 | `bl 0x42c` at `0x1ddf8` (post `0x7041`) | center button, once per press, peripheral task | `center_hook` | step the preset mode |
-| jump tables `0xf3d0`, `0xf0a0` | photo / video size setup | size stubs | 640-wide output |
+| jump table `0xf3d0` | photo size setup | size stubs | small output |
 | `0x22b38`, `0x350f0`, `0x2ed50` | — | (NOPs) | speaker amp off |
 | `0x3e03c`, `0x21318`, `0x1dd44`, `0x1deac`, `0x1ddf8`, `0x1dff8` | card mount, refresh, arrows, center, shutter | `story_*` | [the story at startup](#a-story-at-startup) |
 
@@ -258,23 +248,22 @@ B/BL targets and pointers, ARM and Thumb):
 | Address | Contents |
 |---|---|
 | `0xbab6c` | `hook` (fixed: `hook_jump.s` branches here) |
-| `0xbad6c` | `draw_tag` (subroutine, also called by the video hook) |
+| `0xbad6c` | `draw_tag` (subroutine) |
 | `0xbae98` | `lut_build` (per photo) |
-| `0xbaeb0` | `lut_fill` (subroutine, also called by the video hook) |
+| `0xbaeb0` | `lut_fill` (subroutine) |
 | `0xbb000` | `pick` (random preset ≠ `PAL_IDX`; also called by the display hook) |
 | `0xbb03c` | `BAYER`, then `VARS` (`LUT_PTR`, `CUR_PAL`, `PAL_IDX`, `STRIP_N`; the mode is in the saved settings since `v017`) |
-| `0xbb060` | size stubs (`photo43`/`vid43`, `stub169`/`vid169`, `stub32`/`vid32`, `stub11`/`vid11`, `size_common`) |
+| `0xbb060` | size stubs (`photo43`, `stub169`, `stub32`, `stub11`, `size_common`) |
 | `0xbb0e4` | `idx_stub`: `b lut_build` (cave ends `0xbb0e8`; ~600 B free) |
 
 (Addresses as of `v014`, `v015` within a few words; the preset data moved out
 to its own cave, below.)
 
-**Video cave** — `0xbb774–0xbbc00` (of the dead range `0xbb774–0xbc744`), the unreferenced functions
+**fx4 cave** (the video cave until `v027`) — `0xbb774–0xbbc00` (of the dead range `0xbb774–0xbc744`), the unreferenced functions
 `FUN_000bb774…FUN_000bc19c` (no branch or pointer into the range; they only
 call the libgcc division helpers). `FUN_000bb3f8` just before it is avoided: a
 word in a libm constant table happens to equal `0xbb679`, which looks like a
-pointer into it. Currently `vhook` at `0xbb774`, `BAYER` and `VVARS` after it;
-ends `0xbb9a0`.
+pointer into it. `fx4` (`fx4.s`, fx_strip's 4×4 blocks) at a fixed `0xbb774`.
 
 **Preset data cave** — `0xbbc00–0xbc400`, the end of that range
 (`preset_data.s`, data only): `MATCH_PALETTES` (`0xbbc00`), `PRESET_MATCH`,
@@ -286,10 +275,10 @@ cave as `--defsym`s.
 branches into it come from the dead `FUN_000bc19c` itself): `lcd_hook` at
 `0xbc400`, then `LCD_TAGS`; ends `0xbc4e4`.
 
-Only `hook` and `vhook` have fixed addresses. `build.sh` reads every other
+Only `hook` and `fx4` have fixed addresses. `build.sh` reads every other
 address from the object files (`llvm-nm`) and patches the jump tables and
-`cyc_jump.s` with them. It passes `lut_fill`, `draw_tag` and `VARS` to the
-video cave, and `pick` and `VARS` to the display cave, as `--defsym`s, so
+`cyc_jump.s` with them. It passes `VARS` to
+`fx4`, and `pick` and `VARS` to the display cave, as `--defsym`s, so
 layouts can change freely.
 
 Assembly conventions:
@@ -859,81 +848,6 @@ step the slots in the normal mode; both size tables' slots equal the factory
 entries of aspects 0–4; the bracket for every slot is the stock one for its
 aspect. Works on the camera (`v023`, 2026-10-26).
 
-## The site's firmware editor
-
-`site/editor/` (on godox.klve.nl) lets anyone fill 8 preset slots (palette,
-S-curve, film, contrast, brightness, tag, display code) and tick 1–8 of them,
-turn rnd and the [normal mode](#the-normal-mode-no-effect) on or off,
-leave the tags off, set the photo/video size of each aspect setting, and turn sounds
-on or off (stock, Mario or their own), previews them on photos, and builds
-the firmware in the browser.
-
-**S-curve and films.** A preset's paint colours are its colours through the
-S-curve (a checkbox), then through its film (a dropdown); the camera only sees
-the result, so neither costs anything on the camera. The S-curve is BW's tone
-curve, luma through `BW_MATCH` -> `BW_LEVELS` (chroma kept): on BW's greys it
-gives exactly `BW_LEVELS`, so BW is "greys + S-curve". It works on the paint
-colours, after matching: the dither blends then follow the curve, and the
-palette itself gets the contrast. (Before matching, on the photo, it would
-keep the palette's colours pure and only change which get picked; that needs
-a luma table in the photo and video hooks, about as fast as today's
-contrast/brightness maths, but wasn't needed.) `films.js` repeats `film.py`'s
-trilinear HaldCLUT lookup step for step (float32 where numpy has float32,
-round half to even), and gives exactly `film_colours.py` for EP6 and 6FP.
-`editor_data.py FILMS` picks the 12 films the editor offers (copied from
-`film_luts/` to `site/editor/films/`, ~200 KB each, loaded when chosen).
-
-**Template, not assembler.** Everything the editor changes is data or an
-immediate, so it patches one template build (`site/editor/v023_editor_template.bin`,
-checked against its sha256) instead of assembling:
-
-- The preset data cave has a fixed layout (`palettes.py PD`): each table is
-  padded to room for `MAX_PRESETS` = 8 of `NMAX` = 32 colours (0xbbc00–
-  0xbc318 since `v023`), and `LCD_TAGS` to 10 entries (8 presets, rnd, nor). The caves already walk the match
-  palettes by their counts and the paint colours by pointer, so only the
-  labels had to stop moving. Since then every build uses this layout (one
-  match palette per preset, no sharing).
-- `NPAL` is an immediate in six instructions (`npal_*` labels in
-  `photo_cave.s` and `lcd_cave.s`; ARM immediates under 256 are the
-  instruction's low byte). `last_center` holds `NPAL - 1 + RND_MODE`, where
-  the center button wraps: with rnd off it skips the rnd mode. A saved mode
-  the build doesn't have (e.g. from a build with more presets) already
-  counts as the first preset.
-- Sounds: the speaker's three amp-on calls (on, or NOPs when silent, as
-  `SILENT=1`) and the CAMERA, POWERON_AUDIO and CLICK slots, written as
-  `patch_res.py` does (0xFF padding; silent = the WAV with its data zeroed).
-  The template is silent, so with sounds on the editor also puts the
-  factory's CLICK slot back, byte for byte (`sounds/stock_click.wav`).
-- Tags off: the tag records stay zero (cell 0 = the photo shows through), so
-  `draw_tag` draws nothing; no code changes.
-- Contrast and brightness: each preset's `PRESET_FX` record (flags 0,
-  `contrast_fix`, brightness as a signed byte).
-- The normal mode: the `npal1_*`, `max_*` and `after_last` immediates (see
-  [the normal mode](#the-normal-mode-no-effect)). The display codes of rnd and
-  `nor` sit at fixed places after the 8 presets' in `LCD_TAGS`.
-- Sizes: the 16 words of `SIZES` (output and crop per aspect, the crop from
-  `cropFor`) and the immediate of `cmp_max_w` (the widest output), encoded as
-  llvm-mc does: the smallest 8-bit value with an even rotation (704 = 11 ror
-  26).
-
-`site/editor/template.json` lists every offset, read from the assembled caves
-by `editor_data.py`. `firmware.js` is the patcher (no DOM, runs in Node),
-`sim.js` the preview (the camera's table and Bayer, as `sim_palette.py`),
-`editor.js` the UI (state in localStorage). The page's stylesheet and
-scripts, the editor's modules and its JSON carry one `?v=` stamp, so a deploy
-never mixes cached and new files: run `sh tools/bump_site_version.sh` before
-committing site changes.
-
-**Verified (2026-10-18):** `editor_check.sh` (16 random configs: 1–8 presets
-of 1–32 colours, random tags and segments, rnd and sounds on/off, random and
-stock WAVs; since 2026-10-23 also tags on/off and random sizes) gives
-byte-identical files from the editor and `build.sh`; so did
-two downloads from the page itself (7 presets and an uploaded sound; 5
-presets, one with an edited palette through Kodachrome 64). The emulator
-tests pass on the default template, on 8 presets of up to 32 colours and on
-the downloaded config. With one preset rnd can only repeat it, so the editor
-offers rnd from two presets on.
-
 ## EXIF
 
 The stock JPEGs have no APP1: only SOI, SOF0, a `GPEncode` COM, DQT, DRI,
@@ -1040,6 +954,11 @@ Stock video: H.264 High@4.1, 1920×1080, ~28 fps, ~9 Mbit/s, 16 kHz mono PCM,
 in a QuickTime `.mov` named `IMG_xxxx.mov` (the `MOVA%04d.avi` strings in the
 firmware are leftovers).
 
+Since `v028` the firmware leaves video alone (stock sizes, no effect). Small
+video and its palette dithering (`SMALLVID`, `VIDFX`, `video_cave.s`,
+`v011`–`v027`) are in git history; the notes below are kept for the
+hardware facts.
+
 ### Small video
 
 The same `FUN_0000f004` sizes video (`APMode 0x101`). The video setting
@@ -1113,29 +1032,6 @@ barcode version is in commit `ebfafdd`):
    each strip. The
    counter rose by one per strip within a frame, which settled the per-strip
    calls, the buffer pool, and the meaning of `+0xc8`/`+0xec`.
-
-### Palette dithering on video
-
-`tools/patches/video_cave.s` (`VIDFX=1`) runs the photo hook's per-block work
-on every 64-row strip: 2×2 luma average, `CONTRAST`/`BRIGHT`, 4×4 Bayer, table
-lookup, paint the block. Strips start on 64-row boundaries, so the Bayer phase
-lines up across strips. It shares the photo cave's palettes, table and memory,
-through two subroutines in the photo cave:
-
-- `lut_fill` on the first strip of each recording (≥ 500 ms since the
-  previous strip): every video gets a new random palette (never the same twice
-  in a row, across photos and videos);
-- `draw_tag` on the first strip of each frame (new timestamp), so every frame
-  carries the palette tag, top right (confirmed on IMG_0322–0325).
-
-The hook only writes a strip if it is on the front-camera path, in format
-`'#'`, 640 wide, with a valid buffer, so stock full-size video (`SMALLVID=0`)
-is left alone.
-
-`tools/emu_video.py` checks it in Unicorn against `sim_palette.py`: 0.00%
-blocks differing, the tag on exactly the first strip of each frame, table
-reuse within a recording (one allocation), a new palette per recording, the
-timing bar, and registers restored with `r3 = venc[0]` on return to `0x18d18`.
 
 ### Timing and headroom
 
@@ -1643,7 +1539,7 @@ display caves where their code ends, which changes nothing without
 |---|---|---|
 | `0xba74c–0xba91c` | `story_cave.s` | `draw`, `story_prev`, `VARS` (`MEM`, `BUF`, `END`, `LINE`, `TRIED`, `SENT`), the path; dead `FUN_000ba74c` (no branch, pointer or `adr` into it) |
 | `0xbb340–0xbb3f8` | `story_load.s` | `story_load`; the end of the photo cave's dead `FUN_000bab6c` (full) |
-| `0xbbb08–0xbbc00` | `story_hooks.s` | the hooks, `story_next`; after the video cave (which ends at `0xbbb08` with `VIDTIMING=1`) |
+| `0xbbb08–0xbbc00` | `story_hooks.s` | the hooks, `story_next`; after the fx4 cave |
 | `0xbc660–0xbc744` | `story_data.s` | `put`, `FONT`, `WIDE`, `WIRE`; after the display cave (2 B left) |
 
 Not dead after all, for the next search: `0x80c–0xc38` (unreferenced by
