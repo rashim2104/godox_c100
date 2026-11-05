@@ -18,7 +18,7 @@ of digicam.MODES, a value that is not a mode, and CCD with the clock not set):
 Reports snap's instructions per photo and the hook's per strip (~310 M
 instructions/s on the camera).
 """
-import os, struct, subprocess, sys
+import contextlib, io, os, struct, subprocess, sys
 import numpy as np
 from PIL import Image
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE
@@ -123,6 +123,12 @@ def main():
     ycc = ycc[:H]
     Y0 = ycc[..., 0].copy()
     UV0 = (ycc[..., 1:].astype(int).reshape(H // 2, 2, W // 2, 2, 2).sum(axis=(1, 3)) // 4).astype(np.uint8)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        D.asm()
+    assert open('build/obj/digicam.inc').read() == out.getvalue(), \
+        'build/obj/digicam.inc is not tools/digicam.py: run with the build\'s STAMP_* settings'
+    print(f'stamp: {D.STAMP_ORDER}, time {D.STAMP_TIME}, {D.STAMP_COLOR}, {D.SW} x {D.SH}')
     sym = symbols('build/obj/digicam_cave.o')
     prof = symbols('build/obj/profile_data.o')['PROFILES']
     fw = open(FW, 'rb').read()
@@ -147,7 +153,7 @@ def main():
         stamped = k > 0 and clock_set
         if stamped:
             buf = bytes(uc.mem_read(HEAP, D.SW * D.SH))
-            good &= buf == D.render(CLOCK[5], CLOCK[4], CLOCK[3])
+            good &= buf == D.render(CLOCK[5], CLOCK[4], CLOCK[3], CLOCK[2], CLOCK[1])
         Y, UV = Y0.copy(), UV0.copy()
         bytes_ = W * ROWS * 3 // 2
         per = []
@@ -162,7 +168,7 @@ def main():
         most = max(most, max(per))
         wY, wU, wV = Y0.copy(), UV0[..., 0].copy(), UV0[..., 1].copy()
         if stamped:
-            D.apply_stamp(wY, wU, wV, D.render(CLOCK[5], CLOCK[4], CLOCK[3]))
+            D.apply_stamp(wY, wU, wV, D.render(CLOCK[5], CLOCK[4], CLOCK[3], CLOCK[2], CLOCK[1]))
         dy = int((Y != wY).sum())
         duv = int((UV[..., 0] != wU).sum() + (UV[..., 1] != wV).sum())
         changed = int((Y != Y0).sum())
