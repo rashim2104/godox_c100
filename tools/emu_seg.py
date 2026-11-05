@@ -20,6 +20,8 @@ import os, subprocess, struct, sys
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP)
+sys.argv[1:] = [a if a.startswith('-') else os.path.abspath(a) for a in sys.argv[1:]]
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FW = sys.argv[1] if len(sys.argv) > 1 else 'build_backups/v001_original.bin'
 APP = 0x10200                       # file offset of RAM address 0

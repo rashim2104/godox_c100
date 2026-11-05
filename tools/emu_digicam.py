@@ -24,6 +24,8 @@ from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
 sys.path.insert(0, os.path.dirname(__file__))
 import digicam as D
+sys.argv[1:] = [a if a.startswith('-') else os.path.abspath(a) for a in sys.argv[1:]]
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FW = 'build/GP_CARDVR_UPGRADE.BIN'
 APP = 0x10200

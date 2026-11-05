@@ -10,10 +10,12 @@ FUN_0001808c does, stubs write (records what is written) and the RTC
 snprintf. Writes the recorded file plus the photo's scan data to OUT.jpg
 and checks the layout; `exiftool -validate OUT.jpg` checks the EXIF.
 """
-import struct, sys
+import os, struct, sys
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_LR,
                                UC_ARM_REG_PC, UC_ARM_REG_SP)
+sys.argv[1:] = [a if a.startswith('-') else os.path.abspath(a) for a in sys.argv[1:]]
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FW = 'build/GP_CARDVR_UPGRADE.BIN'
 APP = 0x10200

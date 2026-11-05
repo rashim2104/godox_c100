@@ -219,7 +219,21 @@ snap:
     movs    r11, r0
     beq     9f                            @ no memory: no stamp
     str     r11, [r10, #V_BUF]
-1:  mov     r0, #0
+1:  mov     lr, pc
+    b       stamp_draw
+    cmp     r0, #0
+    bne     9f                            @ clock not set: no stamp
+    mov     r0, #1
+    strb    r0, [r10, #V_ON]
+9:  pop     {r0-r12, lr}
+    push    {r3, r4, r5, r6, r7, lr}      @ the instruction we replaced (0x187c4)
+    b       RESUME187
+
+@ Clear the stamp buffer r11 and draw the clock's date into it. r0 = 0 when
+@ drawn, else the clock is not set (the buffer stays clear). r1-r12 kept.
+stamp_draw:
+    push    {r1-r12, lr}
+    mov     r0, #0
     ldr     r1, =SW * SH
     mov     r2, r11
 2:  str     r0, [r2], #4
@@ -230,7 +244,7 @@ snap:
     mov     lr, pc
     b       GETTIME
     cmp     r0, #0
-    bne     8f                            @ clock not set: no stamp
+    bne     8f
     mov     r4, #PAD                      @ r4 = x
     ldr     r0, [sp, #12]                 @ day
     mov     lr, pc
@@ -248,13 +262,9 @@ snap:
     bhs     3b
     mov     lr, pc
     b       pair
-    ldr     r10, =VARS - base
-    mov     r0, #1
-    strb    r0, [r10, #V_ON]
+    mov     r0, #0
 8:  add     sp, sp, #28
-9:  pop     {r0-r12, lr}
-    push    {r3, r4, r5, r6, r7, lr}      @ the instruction we replaced (0x187c4)
-    b       RESUME187
+    pop     {r1-r12, pc}
 
 @ ISP profile r1 (0 = stock, then CCD, Y2K): point the ISP context's gamma
 @ (+0x177c) and colour matrix (+0x1794) at its tables and reload both
