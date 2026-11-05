@@ -1,12 +1,13 @@
 @ The camera's mode on the see-through display, cycled with the center button.
 @
-@ The mode (digicam_cave.s: nor, CCD, Y2K; NMODES) lives in byte 0xf1 of the
-@ camera's settings (0x132160, 0xf4 bytes, checksummed and saved to NVRAM at
+@ The mode (digicam_cave.s: nor, CCD, Y2K, BW, NGT, SUN; NMODES) lives in
+@ byte 0xf1 of the camera's settings (0x132160, 0xf4 bytes, checksummed and saved to NVRAM at
 @ power-off when its dirty byte +0xa0 is 1; no firmware instruction uses
 @ offsets 0xf1-0xf3), so it survives power-off; any other value counts as
 @ nor. The display is an HT1621 segment panel (see docs/c100-firmware.md); in
 @ photo and video mode its readouts are blank. There, the three cells of the
-@ shutter-speed (SS) readout show the mode's code: "nor", "CCd" or "Y2K".
+@ shutter-speed (SS) readout show the mode's code: "nor", "CCd", "Y2K",
+@ "bW" (W over two cells), "nGt" or "SUn".
 @
 @ lcd_hook: the periodic display refresh (FUN_00021318) draws the readouts
 @ with 0x21180(flag), flag = 1 in the readout state (UI state 2), else 0. It

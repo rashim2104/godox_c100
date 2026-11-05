@@ -229,7 +229,7 @@ if __name__ == '__main__':
         STOCK_POSTS = ['0x7018', hex(CYCLE_MSG)]
         modes = list(range(len(digicam.MODES)))        # the center button's cycle
         code = lambda mode: digicam.MODES[mode]
-        lcd_text = lambda mode: digicam.LCD[code(mode)]
+        lcd_text = lambda mode: ''.join(digicam.LCD[code(mode)])
         SS = set(range(digicam.SS_FIRST, digicam.SS_FIRST + digicam.SS_COUNT))
         glyph = {frozenset(segs): name for name, segs in digicam.SEG7.items()}
         glyph[frozenset()] = ' '

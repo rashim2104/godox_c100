@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The camera's modes (nor, CCD, Y2K): their ISP profiles, display codes and
+"""The camera's modes (nor, CCD, Y2K, BW, NGT, SUN): their ISP profiles, display codes and
 the digicam date stamp. Generates digicam.inc for the caves and is the exact
 reference the emulator check (emu_digicam.py) compares the firmware against.
 
@@ -18,18 +18,19 @@ stock curve: knot_c = T_c(stock knot), so T_c works on display values.
 CCM (0xd6338): 9 signed shorts, row-major, 0x80 = 1.0 (each row sums ~128).
 A profile is S(sat) . stock, S keeping luma (BT.601 weights) per row.
 
-Stamp: "DD MM 'YY" in italic, anti-aliased 7-segment digits with a faint glow,
+Stamp: "DD MM 'YY" (STAMP_ORDER, STAMP_TIME, STAMP_COLOR below: build-time
+environment variables) in italic, anti-aliased 7-segment digits with a faint glow,
 rendered once per photo into an SW x SH coverage buffer (0..255), then blended
 into the photo's bottom right by the strip hook: luma by blend_y (the glow only
 lightens, the core covers), each 2x2 block's chroma toward STAMP_U/V by its
 mean coverage.
 """
-import struct, sys
+import os, struct, sys
 
-FW = 'build_backups/v001_original.bin'
+FW = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'build_backups/v001_original.bin')
 APP = 0x10200
 GAMMA_AT, CCM_AT = 0xd8050, 0xd6338
-MODES = ['nor', 'CCD', 'Y2K']
+MODES = ['nor', 'CCD', 'Y2K', 'BW', 'NGT', 'SUN']
 
 
 def stock():
@@ -87,9 +88,56 @@ def y2k_cast(y):
     return rgb_offset(dcb, dcr)
 
 
+# BW: punchy black and white. No colour at all (the matrix's rows are the luma
+# weights), black point 8, white 248, a strong S-curve, a faint warm paper
+# tone in the mid-tones.
+def bw_tone(v):
+    y = clamp((v - 8) / 240, 0, 1)
+    y += 0.7 * y * (1 - y) * (2 * y - 1)
+    return 255 * y
+
+
+def bw_cast(y):
+    w = 4 * (y / 255) * (1 - y / 255)
+    return tuple(d * w for d in rgb_offset(-1.0, 0.8))
+
+
+# NGT: a cold night. Blacks crushed below 14, the mids pushed down (power
+# 1.4), white held at 245, a teal-blue cast that fades in from black (so
+# black stays black) and eases off in the highlights, saturation x0.8.
+def ngt_tone(v):
+    y = clamp((v - 14) / 236, 0, 1)
+    return 245 * y ** 1.4
+
+
+def ngt_cast(y):
+    w = min(1, 3 * y / 255) * (1 - 0.5 * y / 255)
+    return tuple(d * w for d in rgb_offset(9, -6))
+
+
+# SUN: a disposable film camera in the sun. Lifted blacks (18), bright mids,
+# a soft shoulder to 246, a golden cast (more yellow in the highlights, a
+# touch of red in the shadows), saturation x1.1.
+SUN_POINTS = [(0, 18), (32, 46), (64, 80), (96, 114), (128, 146), (160, 177), (192, 205),
+              (224, 229), (255, 246)]
+
+
+def sun_tone(v):
+    return interp(SUN_POINTS, v)
+
+
+def sun_cast(y):
+    s = max(0, 1 - y / 128)
+    h = max(0, (y - 128) / 127)
+    return rgb_offset(-10 - 6 * h, 5 + 2 * s)
+
+
 PROFILES = {
     'CCD': dict(tone=ccd_tone, cast=ccd_cast, sat=(1.15, 1.15, 1.15)),
     'Y2K': dict(tone=y2k_tone, cast=y2k_cast, sat=(0.9, 0.85, 0.9)),
+    'BW': dict(tone=bw_tone, cast=bw_cast, sat=(0, 0, 0)),
+    'NGT': dict(tone=ngt_tone, cast=ngt_cast, sat=(0.8, 0.8, 0.8)),
+    'SUN': dict(tone=sun_tone, cast=sun_cast, sat=(1.1, 1.1, 1.1)),
 }
 
 
@@ -128,10 +176,12 @@ def ccm(p):
 
 
 # ---- The display: the mode's code on the shutter-speed (SS) readout's three
-# 7-segment cells, blank in photo and video mode. ----
+# 7-segment cells, blank in photo and video mode. A code is one glyph per
+# cell; W takes two cells, its left half 'W<' and right half 'W>'. ----
 SEG7 = {'n': 'ceg', 'o': 'cdeg', 'r': 'eg', 'C': 'adef', 'd': 'bcdeg', 'Y': 'bcdfg', '2': 'abdeg',
-        'K': 'acefg'}
-LCD = {'nor': 'nor', 'CCD': 'CCd', 'Y2K': 'Y2K'}
+        'K': 'acefg', 'b': 'cdefg', 'W<': 'cdef', 'W>': 'bcde', 'G': 'acdef', 't': 'defg',
+        'S': 'acdfg', 'U': 'bcdef'}
+LCD = {'nor': 'nor', 'CCD': 'CCd', 'Y2K': 'Y2K', 'BW': ['b', 'W<', 'W>'], 'NGT': 'nGt', 'SUN': 'SUn'}
 # Segment -> (HT1621 address, COM) for each 7-segment cell, left to right:
 # ISO 1-2, F 1-2, SS 1-3, found by running the firmware's digit routines
 # (FUN_00049ea8, FUN_0004a4ec, FUN_0004a074, FUN_0004a374, FUN_0004a1f0) for
@@ -193,13 +243,58 @@ GLOW = 88                                   # coverage at the edge's glow, < 128
 # the tip (Q), vertical. A segment is a hexagon: |across| <= TH and
 # |along| + |across| <= half length.
 SEGS = [(208, 48, 144, 0), (368, 208, 144, 1), (368, 528, 144, 1), (208, 688, 144, 0),
-        (48, 528, 144, 1), (48, 208, 144, 1), (208, 368, 144, 0), (48, 96, 80, 1)]
+        (48, 528, 144, 1), (48, 208, 144, 1), (208, 368, 144, 0), (48, 96, 80, 1),
+        (48, 208, 56, 1), (48, 528, 56, 1)]              # the colon's dots
 DIGITS = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f]
-APOS = 0x80
+APOS, COLON = 0x80, 0x300
 ADV_APOS, ADV_DIGIT, ADV_SPACE = 14, 32, 14
-SW, SH = 250, DH + 2 * PAD
+
+# Build-time options (environment variables, read by build.sh's `digicam.py
+# asm` and by the emulator check alike):
+#   STAMP_ORDER  dmy (default) "05 11 '26", ymd "'26 11 05", mdy "11 05 '26"
+#   STAMP_TIME   0 (default), 1: the time after a gap, "05 11 '26  14:07"
+#   STAMP_COLOR  orange (default), red, yellow, green: the LED's Y, U, V
+F_MIN, F_HOUR, F_DAY, F_MON, F_YEAR = 4, 8, 12, 16, 20     # offsets into the RTC's int t[7]
+G_APOS, G_COLON, F_END = 0x80, 0x81, 0xff
+ORDERS = {'dmy': [F_DAY, F_MON, G_APOS, F_YEAR], 'ymd': [G_APOS, F_YEAR, F_MON, F_DAY],
+          'mdy': [F_MON, F_DAY, G_APOS, F_YEAR]}
+COLORS = {'orange': (170, 50, 202),         # a deep orange LED, ~RGB (255, 144, 32)
+          'red': (110, 89, 231),            # ~RGB (255, 50, 40)
+          'yellow': (210, 32, 160),         # ~RGB (255, 220, 40)
+          'green': (178, 78, 44)}           # ~RGB (60, 255, 90)
+STAMP_ORDER = os.environ.get('STAMP_ORDER', 'dmy')
+STAMP_TIME = os.environ.get('STAMP_TIME', '0')
+STAMP_COLOR = os.environ.get('STAMP_COLOR', 'orange')
+if STAMP_ORDER not in ORDERS or STAMP_TIME not in ('0', '1') or STAMP_COLOR not in COLORS:
+    sys.exit(f'digicam.py: STAMP_ORDER {"|".join(ORDERS)}, STAMP_TIME 0|1, STAMP_COLOR {"|".join(COLORS)}')
+
+
+def fields():
+    """The stamp's layout: (what, x's extra advance after it) per item; what =
+    an RTC field (two digits, then x past them and a space), G_APOS or
+    G_COLON. With the time: a gap, the hour, the colon centred between the
+    hour and the minute, the minute."""
+    out = [(f, ADV_APOS if f == G_APOS else 0) for f in ORDERS[STAMP_ORDER]]
+    if STAMP_TIME == '1':
+        out[-1] = (out[-1][0], out[-1][1] + ADV_SPACE)
+        out += [(F_HOUR, -15), (G_COLON, 11), (F_MIN, 0)]      # colon at hour + 63 px, minute + 74
+    return out
+FIELDS = fields()
+
+
+def layout():
+    """(x, what) per item of FIELDS."""
+    out, x = [], PAD
+    for f, extra in FIELDS:
+        out.append((x, f))
+        x += (0 if f in (G_APOS, G_COLON) else 2 * ADV_DIGIT + ADV_SPACE) + extra
+    return out
+
+
+SW = layout()[-1][0] + 76                   # the last pair (58 px), the italic's lean, the glow, room
+SH = DH + 2 * PAD
 MARGIN = 40                                 # from the photo's right and bottom edges
-STAMP_Y, STAMP_U, STAMP_V = 170, 50, 202    # a deep orange LED
+STAMP_Y, STAMP_U, STAMP_V = COLORS[STAMP_COLOR]
 
 
 def lut():
@@ -226,27 +321,24 @@ def coverage(seg, gx, x, y):
     return 255 if i < 0 else LUT[i] if i < NLUT else 0
 
 
-def glyphs(year, mon, day):
-    """(x, segment mask) per glyph of "DD MM 'YY"."""
-    out, x = [], PAD
-    for n in (day, mon, None, year % 100):
-        if n is None:
-            out.append((x, APOS))
-            x += ADV_APOS
-            continue
-        out.append((x, DIGITS[n // 10]))
-        x += ADV_DIGIT
-        out.append((x, DIGITS[n % 10]))
-        x += ADV_DIGIT + ADV_SPACE
+def glyphs(year, mon, day, hour=0, minute=0):
+    """(x, segment mask) per glyph of the stamp, e.g. "DD MM 'YY"."""
+    val = {F_DAY: day, F_MON: mon, F_YEAR: year % 100, F_HOUR: hour, F_MIN: minute}
+    out = []
+    for x, f in layout():
+        if f in (G_APOS, G_COLON):
+            out.append((x, APOS if f == G_APOS else COLON))
+        else:
+            out += [(x, DIGITS[val[f] // 10]), (x + ADV_DIGIT, DIGITS[val[f] % 10])]
     return out
 
 
-def render(year, mon, day):
+def render(year, mon, day, hour=0, minute=0):
     """The coverage buffer (SW x SH bytes): the max over every lit segment,
     evaluated at every pixel."""
     buf = bytearray(SW * SH)
-    for gx, mask in glyphs(year, mon, day):
-        for k in range(8):
+    for gx, mask in glyphs(year, mon, day, hour, minute):
+        for k in range(len(SEGS)):
             if mask >> k & 1:
                 for y in range(SH):
                     for x in range(SW):
@@ -256,12 +348,12 @@ def render(year, mon, day):
     return bytes(buf)
 
 
-def render_boxed(year, mon, day):
+def render_boxed(year, mon, day, hour=0, minute=0):
     """render as the cave does it: each segment only over its box, row by row
     (must equal render)."""
     buf = bytearray(SW * SH)
-    for gx, mask in glyphs(year, mon, day):
-        for k in range(8):
+    for gx, mask in glyphs(year, mon, day, hour, minute):
+        for k in range(len(SEGS)):
             if not mask >> k & 1:
                 continue
             cx, cy, hl, vert = SEGS[k]
@@ -320,7 +412,8 @@ def asm():
     print(f'    .equ    NMODES, {len(MODES)}')
     for k, v in dict(SW=SW, SH=SH, DH=DH, PAD=PAD, TH=TH, SL=SL, R=R, NLUT=NLUT, MARGIN=MARGIN,
                      STAMP_Y=STAMP_Y, STAMP_U=STAMP_U, STAMP_V=STAMP_V, ADV_APOS=ADV_APOS,
-                     ADV_DIGIT=ADV_DIGIT, ADV_SPACE=ADV_SPACE, APOS=APOS).items():
+                     ADV_DIGIT=ADV_DIGIT, ADV_SPACE=ADV_SPACE, APOS=APOS, COLON=COLON,
+                     G_APOS=G_APOS, F_END=F_END).items():
         print(f'    .equ    {k}, {v}')
     print(f'    .equ    SS_FIRST, {SS_FIRST:#x}\n    .equ    SS_COUNT, {SS_COUNT}')
     print('    .macro  LCD_TAG_DATA                  @ per mode: HT1621 nibbles for the SS cells')
@@ -340,7 +433,15 @@ def asm():
     for k in range(0, NLUT, 16):
         print('    .byte   ' + ', '.join(map(str, LUT[k:k + 16])))
     print('DIGITS:\n    .byte   ' + ', '.join(f'{d:#04x}' for d in DIGITS))
+    print(f'FIELDS:                                 @ {STAMP_ORDER}, time {STAMP_TIME}: per item what, x\'s extra advance')
+    print('    .byte   ' + ', '.join(f'{f:#04x}, {e & 0xff}' for f, e in FIELDS + [(F_END, 0)]))
+    print('    .endm')
+    print('    .macro  PROFILE_DATA')
     print('    .align  2')
+    print('PROFILES:                               @ per mode: gamma, colour matrix (nor: the stock ones)')
+    print('    .word   0xd8050, 0xd6338')
+    for name in PROFILES:
+        print(f'    .word   GAMMA_{name} - base, CCM_{name} - base')
     for name, p in PROFILES.items():
         g = gamma(p)
         print(f'GAMMA_{name}:                           @ {name}: RGB gamma (0x90 bytes)')
@@ -358,7 +459,9 @@ def preview(src, prefix):
     from PIL import Image
     im = Image.open(src).convert('RGB')
     L = (0.299, 0.587, 0.114)
-    for name, p in PROFILES.items():
+    names = sys.argv[4:] or PROFILES
+    for name in names:
+        p = PROFILES[name]
         t = curves(p)
         px = im.load()
         out = Image.new('RGB', im.size)
@@ -383,18 +486,33 @@ def check():
         rows = ccm(p)
         for r in range(3):
             assert abs(sum(rows[r * 3:r * 3 + 3]) - sum(m[r * 3:r * 3 + 3])) <= 2, (name, r)
+    assert list(PROFILES) == MODES[1:]
+    assert len(set(SEG7.values())) == len(SEG7)        # emu_seg reads glyphs back
+    assert all(len(LCD[m]) == len(SS_CELLS) for m in MODES)
     t = curves(PROFILES['CCD'])
     assert t[1][5] == 0 and t[1][240] == 255          # crushed blacks, hard clip
     t = curves(PROFILES['Y2K'])
     assert 20 <= t[1][0] <= 24 and t[1][255] <= 242   # lifted blacks, soft white
     assert t[0][128] > t[2][128]                      # warm
-    b = render(2026, 11, 5)
-    assert b == render_boxed(2026, 11, 5) == render_boxed(2026, 11, 5)
-    for date in [(2088, 12, 28), (2000, 1, 1), (2099, 8, 30)]:
+    rows = ccm(PROFILES['BW'])
+    assert rows[0:3] == rows[3:6] == rows[6:9]        # no colour
+    t = curves(PROFILES['BW'])
+    assert t[1][8] == 0 and t[1][248] == 255 and t[1][64] < 50 and t[1][192] > 205   # punchy
+    assert 0 <= t[0][128] - t[2][128] <= 4                                         # near neutral
+    t = curves(PROFILES['NGT'])
+    assert all(t[c][14] == 0 for c in range(3)) and t[1][128] < 112 and t[1][255] <= 246
+    assert t[2][128] > t[0][128] + 6                  # cold
+    t = curves(PROFILES['SUN'])
+    assert 16 <= t[1][0] <= 20 and t[1][255] <= 248 and t[1][128] > 140
+    assert t[0][128] > t[2][128] + 15 and t[1][200] > t[2][200]   # golden
+    b = render(2026, 11, 5, 14, 7)
+    assert b == render_boxed(2026, 11, 5, 14, 7)
+    for date in [(2088, 12, 28, 23, 59), (2000, 1, 1, 0, 0), (2099, 8, 30, 10, 48)]:
         assert render(*date) == render_boxed(*date), date
+    assert all(-128 <= e < 128 for _, e in FIELDS)
     assert SW * SH % 4 == 0 and SW % 2 == 0 and SH % 2 == 0          # snap clears in words; blocks
     assert max(LUT) <= 255 and LUT[0] == 255 and LUT[15] >= 128 > LUT[16] == GLOW and LUT[-1] == 0
-    for date in [(2088, 12, 28), (2000, 1, 1)]:
+    for date in [(2088, 12, 28, 23, 58), (2000, 1, 1, 0, 0)]:
         c = render(*date)
         assert not any(c[y * SW + SW - 1] or c[y * SW] for y in range(SH))       # fits, with room
         assert not any(c[:SW]) and not any(c[-SW:])
@@ -408,6 +526,6 @@ if __name__ == '__main__':
         preview(sys.argv[2], sys.argv[3])
     elif cmd == 'stamp':
         from PIL import Image
-        Image.frombytes('L', (SW, SH), render(2026, 11, 5)).resize((SW * 4, SH * 4)).save(sys.argv[2])
+        Image.frombytes('L', (SW, SH), render(2026, 11, 5, 14, 7)).resize((SW * 4, SH * 4)).save(sys.argv[2])
     else:
         sys.exit(__doc__)

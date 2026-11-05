@@ -1,12 +1,13 @@
-@ The digicam modes (tools/digicam.py): nor, CCD and Y2K, chosen with the
-@ center button (lcd_cave.s; the mode is byte 0xf1 of the camera's saved
-@ settings, anything else counts as nor). Every mode takes the factory's
-@ sizes.
+@ The digicam modes (tools/digicam.py): nor, CCD, Y2K, BW, NGT and SUN,
+@ chosen with the center button (lcd_cave.s; the mode is byte 0xf1 of the
+@ camera's saved settings, anything else counts as nor). Every mode takes the
+@ factory's sizes.
 @
 @ snap (cyc_jump.s: FUN_000187c4, the capture handler, once per photo,
-@ camera task): hand the ISP the mode's profile (isp_profile), and in CCD or
-@ Y2K render the date stamp, "DD MM 'YY" from the RTC, into a coverage buffer
-@ (SW x SH bytes, allocated once).
+@ camera task): hand the ISP the mode's profile (isp_profile, tables in
+@ profile_data.s), and in every mode but nor render the date stamp, "DD MM
+@ 'YY" from the RTC (STAMP_ORDER, STAMP_TIME), into a coverage buffer (SW x
+@ SH bytes, allocated once).
 @
 @ hook (hook_jump.s: FUN_00015448, the scaler's "strip ready" callback,
 @ interrupt): each call hands over one finished strip (FUN_0001523c queues one
@@ -229,7 +230,8 @@ snap:
     push    {r3, r4, r5, r6, r7, lr}      @ the instruction we replaced (0x187c4)
     b       RESUME187
 
-@ Clear the stamp buffer r11 and draw the clock's date into it. r0 = 0 when
+@ Clear the stamp buffer r11 and draw the clock's date (and time, with
+@ STAMP_TIME) into it, laid out by FIELDS (digicam.py fields). r0 = 0 when
 @ drawn, else the clock is not set (the buffer stays clear). r1-r12 kept.
 stamp_draw:
     push    {r1-r12, lr}
@@ -246,33 +248,37 @@ stamp_draw:
     cmp     r0, #0
     bne     8f
     mov     r4, #PAD                      @ r4 = x
-    ldr     r0, [sp, #12]                 @ day
-    mov     lr, pc
-    b       pair
-    ldr     r0, [sp, #16]                 @ month
-    mov     lr, pc
-    b       pair
-    mov     r5, #APOS
+    ldr     r6, =FIELDS - base            @ per item: what, x's extra advance
+1:  ldrb    r0, [r6], #1
+    ldrsb   r7, [r6], #1
+    cmp     r0, #F_END
+    beq     7f
+    cmp     r0, #G_APOS
+    blo     2f                            @ an RTC field
+    moveq   r5, #APOS                     @  else the apostrophe or the colon
+    movne   r5, #COLON
     mov     lr, pc
     b       glyph
-    add     r4, r4, #ADV_APOS
-    ldr     r0, [sp, #20]                 @ year
-3:  cmp     r0, #100
+    b       5f
+2:  ldr     r0, [sp, r0]
+3:  cmp     r0, #100                      @ the year's last two digits
     subhs   r0, r0, #100
     bhs     3b
     mov     lr, pc
     b       pair
-    mov     r0, #0
+5:  add     r4, r4, r7
+    b       1b
+7:  mov     r0, #0
 8:  add     sp, sp, #28
     pop     {r1-r12, pc}
 
-@ ISP profile r1 (0 = stock, then CCD, Y2K): point the ISP context's gamma
+@ ISP profile r1 (0 = stock, then CCD, Y2K, BW, NGT, SUN): point the ISP context's gamma
 @ (+0x177c) and colour matrix (+0x1794) at its tables and reload both
 @ (FUN_000981fc, FUN_000982a4, as the ISP's init does). Every photo, before
 @ its capture, so nothing is cached. All registers preserved.
 isp_profile:
     push    {r0-r12, lr}
-    ldr     r2, =PROFILES - base
+    ldr     r2, =PROFILES                 @ profile_data.s (build.sh --defsym)
     add     r2, r2, r1, lsl #3
     ldm     r2, {r2, r3}
     ldr     r0, =ISP_CTX
@@ -307,7 +313,8 @@ pair:
     add     r4, r4, #ADV_DIGIT + ADV_SPACE
     pop     {r0-r3, r5, pc}
 
-@ The segments of mask r5 (bit 0 = a, ..., bit 7 = the apostrophe) at x = r4
+@ The segments of mask r5 (bit 0 = a, ..., bit 7 = the apostrophe, 8-9 the
+@ colon's dots) at x = r4
 @ into the stamp r11. r0-r10 kept.
 glyph:
     push    {r0-r10, lr}
@@ -432,10 +439,6 @@ seg:
     .ltorg
 
     .align  2
-PROFILES:                               @ gamma, colour matrix: stock (the calibration's), CCD, Y2K
-    .word   0xd8050, 0xd6338
-    .word   GAMMA_CCD - base, CCM_CCD - base
-    .word   GAMMA_Y2K - base, CCM_Y2K - base
 VARS:
     .word   0                             @ V_ROW
     .word   0                             @ V_BUF

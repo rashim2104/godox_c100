@@ -6,10 +6,11 @@ emulator and check it against tools/digicam.py.
 
 Loads build/GP_CARDVR_UPGRADE.BIN and stubs the firmware calls the cave makes
 (cache maintenance, pvPortMalloc, the RTC, the ISP's gamma and colour matrix
-reloads, which record what the ISP context points at). Per mode (nor, CCD,
-Y2K, a value that is not a mode, and CCD with the clock not set):
+reloads, which record what the ISP context points at). Per mode (every one
+of digicam.MODES, a value that is not a mode, and CCD with the clock not set):
   1. runs snap (the per-photo entry): the ISP must get the mode's profile,
-     and in CCD/Y2K the stamp buffer must be digicam.render of the clock;
+     and in every mode but nor the stamp buffer must be digicam.render of the
+     clock;
   2. packs the photo (at its own size, as the factory's) into 32-row strips
      in the camera's YUV 4:2:0 layout, alternating strip A and B, and runs the
      strip hook on each; the result must be the photo with digicam.apply_stamp
@@ -17,7 +18,7 @@ Y2K, a value that is not a mode, and CCD with the clock not set):
 Reports snap's instructions per photo and the hook's per strip (~310 M
 instructions/s on the camera).
 """
-import os, struct, subprocess, sys
+import contextlib, io, os, struct, subprocess, sys
 import numpy as np
 from PIL import Image
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE
@@ -122,13 +123,19 @@ def main():
     ycc = ycc[:H]
     Y0 = ycc[..., 0].copy()
     UV0 = (ycc[..., 1:].astype(int).reshape(H // 2, 2, W // 2, 2, 2).sum(axis=(1, 3)) // 4).astype(np.uint8)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        D.asm()
+    assert open('build/obj/digicam.inc').read() == out.getvalue(), \
+        'build/obj/digicam.inc is not tools/digicam.py: run with the build\'s STAMP_* settings'
+    print(f'stamp: {D.STAMP_ORDER}, time {D.STAMP_TIME}, {D.STAMP_COLOR}, {D.SW} x {D.SH}')
     sym = symbols('build/obj/digicam_cave.o')
-    prof = sym['PROFILES']
+    prof = symbols('build/obj/profile_data.o')['PROFILES']
     fw = open(FW, 'rb').read()
     profiles = [struct.unpack_from('<2I', fw, APP + prof + 8 * k) for k in range(len(D.MODES))]
     assert profiles[0] == (0xd8050, 0xd6338)
     ok, most = True, 0
-    for mode, clock_set in [(0, True), (1, True), (2, True), (7, True), (1, False)]:
+    for mode, clock_set in [(m, True) for m in range(len(D.MODES))] + [(7, True), (1, False)]:
         k = mode if mode < len(D.MODES) else 0
         uc, calls = machine(clock_set)
         steps = [0]
@@ -146,7 +153,7 @@ def main():
         stamped = k > 0 and clock_set
         if stamped:
             buf = bytes(uc.mem_read(HEAP, D.SW * D.SH))
-            good &= buf == D.render(CLOCK[5], CLOCK[4], CLOCK[3])
+            good &= buf == D.render(CLOCK[5], CLOCK[4], CLOCK[3], CLOCK[2], CLOCK[1])
         Y, UV = Y0.copy(), UV0.copy()
         bytes_ = W * ROWS * 3 // 2
         per = []
@@ -161,7 +168,7 @@ def main():
         most = max(most, max(per))
         wY, wU, wV = Y0.copy(), UV0[..., 0].copy(), UV0[..., 1].copy()
         if stamped:
-            D.apply_stamp(wY, wU, wV, D.render(CLOCK[5], CLOCK[4], CLOCK[3]))
+            D.apply_stamp(wY, wU, wV, D.render(CLOCK[5], CLOCK[4], CLOCK[3], CLOCK[2], CLOCK[1]))
         dy = int((Y != wY).sum())
         duv = int((UV[..., 0] != wU).sum() + (UV[..., 1] != wV).sum())
         changed = int((Y != Y0).sum())
