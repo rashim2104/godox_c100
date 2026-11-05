@@ -22,7 +22,7 @@ import contextlib, io, os, struct, subprocess, sys
 import numpy as np
 from PIL import Image
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE
-from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
+from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R3, UC_ARM_REG_R2, UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
 sys.path.insert(0, os.path.dirname(__file__))
 import digicam as D
 sys.argv[1:] = [a if a.startswith('-') else os.path.abspath(a) for a in sys.argv[1:]]
@@ -33,6 +33,7 @@ APP = 0x10200
 RESUME, RESUME187 = 0x1544c, 0x187c8
 CACHE_INV, CACHE_CLEAN, MALLOC, GETTIME = 0x401ac, 0x401b8, 0x5374c, 0x52bd4
 GAMMA_SET, CCM_SET = 0x981fc, 0x982a4
+LOOK_FNS = {0x9852c: 'edge', 0x914e8: 'sharp', 0x915b0: 'hbnr', 0x90af8: 'nr', 0x98810: 'lsc'}
 PHOTO, STRIP_BYTES, SOF = 0x1317ac, 0x13155c, 0xe2f50
 CFG_MODE = 0x132160 + 0xf1
 ISP_CTX, CTX = 0x12846c, 0xa00000
@@ -71,6 +72,13 @@ def machine(clock_set):
         elif addr == GETTIME:
             uc.mem_write(uc.reg_read(UC_ARM_REG_R0), struct.pack('<7i', *CLOCK))
             ret(0 if clock_set else -1)
+        elif addr in LOOK_FNS:
+            name = LOOK_FNS[addr]
+            regs = [uc.reg_read(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3)]
+            if name == 'lsc':
+                regs = [struct.unpack('<I', uc.mem_read(CTX + 0x17b0, 4))[0]]
+            calls.append(('look', name, tuple(regs[:{'nr': 4}.get(name, 1)])))
+            ret()
         elif addr in (GAMMA_SET, CCM_SET):
             off = 0x177c if addr == GAMMA_SET else 0x1794
             calls.append(('gamma' if addr == GAMMA_SET else 'ccm',
@@ -117,6 +125,16 @@ def unpack(buf, Y, UV, y0):
         UV[y0 // 2 + b] = np.concatenate([even[2 * third:], odd[:third]]).reshape(-1, 2)
 
 
+def look_ok(uc, calls, k, prof):
+    """isp_profile's calls past the gamma and matrix, and the context fields
+    it leaves, against digicam.look_calls (fresh context: lens shading 0)."""
+    want, fields = D.look_calls(k, prof, 0)
+    got = [(n, a) for t, n, a in (c for c in calls if c[0] == 'look')]
+    ints = struct.unpack('<4i', uc.mem_read(CTX + 0x14a0, 16))
+    nr, lsc = struct.unpack('<2I', uc.mem_read(CTX + 0x17a8, 4) + uc.mem_read(CTX + 0x17b0, 4))
+    return got == want and ints == fields['sharp_ints'] and nr == fields['nr'] and lsc == fields['lsc']
+
+
 def main():
     ycc = np.asarray(Image.open(sys.argv[1]).convert('YCbCr'))
     H, W = ycc.shape[0] // ROWS * ROWS, ycc.shape[1]
@@ -149,7 +167,8 @@ def main():
         assert run(uc, sym['snap']) == RESUME187
         snap_steps = steps[0]
         isp = [(n, v) for n, v, _ in calls if n in ('gamma', 'ccm')]
-        good = isp == [('gamma', profiles[k][0]), ('ccm', profiles[k][1])]
+        look = look_ok(uc, calls, k, prof)
+        good = look and isp == [('gamma', profiles[k][0]), ('ccm', profiles[k][1])]
         stamped = k > 0 and clock_set
         if stamped:
             buf = bytes(uc.mem_read(HEAP, D.SW * D.SH))
@@ -174,7 +193,7 @@ def main():
         changed = int((Y != Y0).sum())
         good &= dy == 0 and duv == 0 and (changed > 0) == stamped
         ok &= good
-        print(f'mode {mode} ({D.MODES[k]}{"" if clock_set else ", clock not set"}): ISP {isp == [("gamma", profiles[k][0]), ("ccm", profiles[k][1])]}, '
+        print(f'mode {mode} ({D.MODES[k]}{"" if clock_set else ", clock not set"}): look {look}, ISP {isp == [("gamma", profiles[k][0]), ("ccm", profiles[k][1])]}, '
               f'stamp {"on" if stamped else "off"}, {changed} luma changed, differing from the reference: '
               f'{dy} luma, {duv} chroma, snap {snap_steps / 1e3:.0f} k instructions {"" if good else " FAILED"}')
     print(f'hook: up to {most / 1e3:.0f} k instructions per strip (~{most / 310e3:.2f} ms)')

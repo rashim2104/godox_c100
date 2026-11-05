@@ -38,6 +38,7 @@ APP = 0x10200
 CALL_AT, REC_START, RESUME = 0x35e30, 0xfb28, 0x18d18
 CACHE_INV, CACHE_CLEAN, MALLOC, GETTIME = 0x401ac, 0x401b8, 0x5374c, 0x52bd4
 GAMMA_SET, CCM_SET = 0x981fc, 0x982a4
+LOOK_FNS = {0x9852c: 'edge', 0x914e8: 'sharp', 0x915b0: 'hbnr', 0x90af8: 'nr', 0x98810: 'lsc'}
 CFG_MODE = 0x132160 + 0xf1
 ISP_CTX, CTX = 0x12846c, 0xa00000
 VENC = 0x131490
@@ -71,6 +72,13 @@ def machine(clock_set):
         elif addr == GETTIME:
             uc.mem_write(uc.reg_read(UC_ARM_REG_R0), struct.pack('<7i', *CLOCK))
             ret(0 if clock_set else -1)
+        elif addr in LOOK_FNS:
+            name = LOOK_FNS[addr]
+            regs = [uc.reg_read(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3)]
+            if name == 'lsc':
+                regs = [struct.unpack('<I', uc.mem_read(CTX + 0x17b0, 4))[0]]
+            calls.append(('look', name, tuple(regs[:{'nr': 4}.get(name, 1)])))
+            ret()
         elif addr in (GAMMA_SET, CCM_SET):
             off = 0x177c if addr == GAMMA_SET else 0x1794
             calls.append(('gamma' if addr == GAMMA_SET else 'ccm',
@@ -132,6 +140,16 @@ def unpack(buf, H, W):
     return Y, UV
 
 
+def look_ok(uc, calls, k, prof):
+    """isp_profile's calls past the gamma and matrix, and the context fields
+    it leaves, against digicam.look_calls (fresh context: lens shading 0)."""
+    want, fields = D.look_calls(k, prof, 0)
+    got = [(n, a) for t, n, a in (c for c in calls if c[0] == 'look')]
+    ints = struct.unpack('<4i', uc.mem_read(CTX + 0x14a0, 16))
+    nr, lsc = struct.unpack('<2I', uc.mem_read(CTX + 0x17a8, 4) + uc.mem_read(CTX + 0x17b0, 4))
+    return got == want and ints == fields['sharp_ints'] and nr == fields['nr'] and lsc == fields['lsc']
+
+
 def main():
     ycc = np.asarray(Image.open(sys.argv[1]).convert('YCbCr'))
     H, W = ycc.shape[0] & ~1, ycc.shape[1] & ~3
@@ -164,7 +182,8 @@ def main():
         uc.mem_write(VENC + 0xdc, struct.pack('<2I', W, H))
         good = rec_start(uc)
         isp = [(n, v) for n, v, _ in calls if n in ('gamma', 'ccm')]
-        good &= isp == [('gamma', profiles[k][0]), ('ccm', profiles[k][1])]
+        look = look_ok(uc, calls, k, dsym['PROFILES'])
+        good &= look and isp == [('gamma', profiles[k][0]), ('ccm', profiles[k][1])]
         stamped = k > 0 and clock_set
         mallocs = [c for c in calls if c[0] == 'malloc']
         good &= mallocs == ([('malloc', D.SW * D.SH, 0)] if k > 0 and not old else [])
@@ -199,7 +218,7 @@ def main():
         good &= (changed > 0) == stamped
         ok &= good
         print(f'mode {mode} ({D.MODES[k]}{", clock not set" if not clock_set else ""}'
-              f'{", buffer from a photo" if old else ""}): ISP {isp == [("gamma", profiles[k][0]), ("ccm", profiles[k][1])]}, '
+              f'{", buffer from a photo" if old else ""}): look {look}, ISP {isp == [("gamma", profiles[k][0]), ("ccm", profiles[k][1])]}, '
               f'stamp {"on" if stamped else "off"}, {changed} luma changed; {"; ".join(report)}'
               f'{"" if good else "  FAILED"}')
     print(f'{W}x{H}: up to {most / 1e3:.0f} k instructions per frame (~{most / 310e3:.2f} ms)')
